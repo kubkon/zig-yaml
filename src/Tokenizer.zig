@@ -38,6 +38,38 @@ pub const Token = struct {
     };
 };
 
+pub const TokenIndex = usize;
+
+pub const TokenIterator = struct {
+    buffer: []const Token,
+    pos: TokenIndex = 0,
+
+    pub fn next(self: *TokenIterator) Token {
+        const token = self.buffer[self.pos];
+        self.pos += 1;
+        return token;
+    }
+
+    pub fn peek(self: TokenIterator) ?Token {
+        if (self.pos >= self.buffer.len) return null;
+        return self.buffer[self.pos];
+    }
+
+    pub fn resetTo(self: *TokenIterator, pos: TokenIndex) void {
+        self.pos = pos;
+    }
+
+    pub fn advanceBy(self: *TokenIterator, offset: TokenIndex) void {
+        if (offset == 0) return;
+        self.pos += offset - 1;
+    }
+
+    pub fn getPos(self: TokenIterator) TokenIndex {
+        if (self.pos == 0) return 0;
+        return self.pos - 1;
+    }
+};
+
 pub fn next(self: *Tokenizer) Token {
     var result = Token{
         .id = .Eof,

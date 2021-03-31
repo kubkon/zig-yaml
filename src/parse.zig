@@ -1,4 +1,5 @@
 const std = @import("std");
+const assert = std.debug.assert;
 const log = std.log.scoped(.parse);
 const mem = std.mem;
 const testing = std.testing;
@@ -6,45 +7,46 @@ const testing = std.testing;
 const Allocator = mem.Allocator;
 const Tokenizer = @import("Tokenizer.zig");
 const Token = Tokenizer.Token;
-
-const TokenIndex = usize;
+const TokenIndex = Tokenizer.TokenIndex;
+const TokenIterator = Tokenizer.TokenIterator;
 
 pub const Node = struct {
     tag: Tag,
 
     pub const Tag = enum {
         Root,
-        Document,
+        Doc,
     };
 
     pub fn deinit(self: *Node, allocator: *Allocator) void {
         switch (self.tag) {
             .Root => @fieldParentPtr(Node.Root, "base", self).deinit(allocator),
-            .Document => @fieldParentPtr(Node.Document, "base", self).deinit(allocator),
+            .Doc => @fieldParentPtr(Node.Doc, "base", self).deinit(allocator),
         }
     }
 
     pub const Root = struct {
         base: Node = Node{ .tag = Tag.Root },
-        items: std.ArrayListUnmanaged(*Node) = .{},
+        docs: std.ArrayListUnmanaged(*Node) = .{},
+        eof: ?TokenIndex = null,
 
         pub fn deinit(self: *Root, allocator: *Allocator) void {
-            for (self.items.items) |node| {
+            for (self.docs.items) |node| {
                 node.deinit(allocator);
                 allocator.destroy(node);
             }
-            self.items.deinit(allocator);
+            self.docs.deinit(allocator);
         }
     };
 
-    pub const Document = struct {
-        base: Node = Node{ .tag = Tag.Document },
+    pub const Doc = struct {
+        base: Node = Node{ .tag = Tag.Doc },
         start: ?TokenIndex = null,
         directive: ?TokenIndex = null,
         values: std.ArrayListUnmanaged(*Node) = .{},
         end: ?TokenIndex = null,
 
-        pub fn deinit(self: *Document, allocator: *Allocator) void {
+        pub fn deinit(self: *Doc, allocator: *Allocator) void {
             for (self.values.items) |node| {
                 node.deinit(allocator);
                 allocator.destroy(node);
@@ -85,41 +87,118 @@ pub fn parse(allocator: *Allocator, source: []const u8) !Tree {
         .tokens = tokens.toOwnedSlice(),
         .root = undefined,
     };
-    tree.root = try parseRoot(allocator, &tree);
+    var it = TokenIterator{
+        .buffer = tree.tokens,
+    };
+    var parser = Parser{
+        .allocator = allocator,
+        .token_it = &it,
+    };
+    defer parser.deinit();
+    tree.root = try parser.root();
 
     return tree;
 }
 
-fn parseRoot(allocator: *Allocator, tree: *Tree) !*Node.Root {
-    var root = try allocator.create(Node.Root);
-    root.* = .{};
+const Parser = struct {
+    allocator: *Allocator,
+    token_it: *TokenIterator,
+    stack: std.ArrayListUnmanaged(*Node) = .{},
 
-    var stack = std.ArrayList(*Node).init(allocator);
-    defer stack.deinit();
+    fn deinit(self: *Parser) void {
+        self.stack.deinit(self.allocator);
+    }
 
-    var token_index: usize = 0;
-    while (token_index < tree.tokens.len) : (token_index += 1) {
-        const token = tree.tokens[token_index];
+    fn root(self: *Parser) !*Node.Root {
+        var node = try self.allocator.create(Node.Root);
+        errdefer self.allocator.destroy(node);
+        node.* = .{};
 
-        switch (token.id) {
-            .DocStart => {
-                var doc = try allocator.create(Node.Document);
-                doc.* = .{};
-                doc.start = token_index;
-                try stack.append(&doc.base);
-            },
-            .DocEnd => {
-                var node = stack.pop();
-                var doc = @fieldParentPtr(Node.Document, "base", node);
-                doc.end = token_index;
-                try root.items.append(allocator, &doc.base);
-            },
-            else => {},
+        while (true) {
+            if (self.token_it.peek()) |token| {
+                if (token.id == .Eof) {
+                    _ = self.token_it.next();
+                    node.eof = self.token_it.getPos();
+                    break;
+                }
+            }
+
+            var doc_node = try self.doc();
+            try node.docs.append(self.allocator, &doc_node.base);
+        }
+
+        return node;
+    }
+
+    fn doc(self: *Parser) !*Node.Doc {
+        var node = try self.allocator.create(Node.Doc);
+        errdefer self.allocator.destroy(node);
+        node.* = .{};
+
+        if (self.eatToken(.DocStart)) |_| {
+            if (self.eatToken(.Tag)) |_| {
+                node.directive = try self.expectToken(.Literal);
+            }
+        }
+
+        while (true) {
+            const token = self.token_it.next();
+            if (token.id == .Eof) {
+                return error.UnexpectedEof;
+            }
+
+            std.debug.print("{any}\n", .{token.id});
+            switch (token.id) {
+                .DocStart => {
+                    // TODO this should be an error token
+                    return error.NestedDocuments;
+                },
+                .Tag => {
+                    return error.UnexpectedTag;
+                },
+                .DocEnd => {
+                    node.end = self.token_it.getPos();
+                    break;
+                },
+                else => {},
+            }
+        }
+
+        return node;
+    }
+
+    fn eatToken(self: *Parser, id: Token.Id) ?TokenIndex {
+        while (true) {
+            const cur_pos = self.token_it.getPos();
+            _ = self.token_it.peek() orelse return null;
+            const token = self.token_it.next();
+            switch (token.id) {
+                .Comment, .NewLine, .Space => continue,
+                else => |next_id| if (next_id == id) {
+                    return self.token_it.getPos();
+                } else {
+                    self.token_it.resetTo(cur_pos);
+                    return null;
+                },
+            }
         }
     }
 
-    return root;
-}
+    fn expectToken(self: *Parser, id: Token.Id) !TokenIndex {
+        while (true) {
+            _ = self.token_it.peek() orelse return error.UnexpectedEof;
+            const next = self.token_it.next();
+            switch (next.id) {
+                .Comment, .NewLine, .Space => continue,
+                else => |next_id| if (next_id != id) {
+                    return error.UnexpectedToken;
+                } else {
+                    return self.token_it.getPos();
+                },
+            }
+        }
+    }
+};
 
 test "hmm" {
     const source =
@@ -132,6 +211,6 @@ test "hmm" {
 
     std.debug.print("{any}\n", .{tree});
     std.debug.print("{any}\n", .{tree.root.*});
-    const doc = @fieldParentPtr(Node.Document, "base", tree.root.items.items[0]);
+    const doc = @fieldParentPtr(Node.Doc, "base", tree.root.docs.items[0]);
     std.debug.print("{any}\n", .{doc});
 }
