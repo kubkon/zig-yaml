@@ -239,23 +239,23 @@ pub fn next(self: *Tokenizer) Token {
     return result;
 }
 
-fn testExpected(source: []const u8, expected: []const Token.Id) void {
+fn testExpected(source: []const u8, expected: []const Token.Id) !void {
     var tokenizer = Tokenizer{
         .buffer = source,
     };
 
     for (expected) |exp| {
         const token = tokenizer.next();
-        testing.expectEqual(exp, token.id);
+        try testing.expectEqual(exp, token.id);
     }
 }
 
 test "empty doc" {
-    testExpected("", &[_]Token.Id{.Eof});
+    try testExpected("", &[_]Token.Id{.Eof});
 }
 
 test "empty doc with explicit markers" {
-    testExpected(
+    try testExpected(
         \\---
         \\...
     , &[_]Token.Id{
@@ -264,7 +264,7 @@ test "empty doc with explicit markers" {
 }
 
 test "sequence of values" {
-    testExpected(
+    try testExpected(
         \\- val1
         \\- val2
     , &[_]Token.Id{
@@ -278,7 +278,7 @@ test "sequence of values" {
 }
 
 test "sequence of sequences" {
-    testExpected(
+    try testExpected(
         \\- [ val1, val2]
         \\- [val3, val4 ]
     , &[_]Token.Id{
@@ -304,7 +304,7 @@ test "sequence of sequences" {
 }
 
 test "mappings" {
-    testExpected(
+    try testExpected(
         \\key1: value1
         \\key2: value2
     , &[_]Token.Id{
@@ -322,7 +322,7 @@ test "mappings" {
 }
 
 test "inline mapped sequence of values" {
-    testExpected(
+    try testExpected(
         \\key :  [ val1, 
         \\          val2 ]
     , &[_]Token.Id{
@@ -345,7 +345,7 @@ test "inline mapped sequence of values" {
 }
 
 test "part of tdb" {
-    testExpected(
+    try testExpected(
         \\--- !tapi-tbd
         \\tbd-version:     4
         \\targets:         [ x86_64-macos ]

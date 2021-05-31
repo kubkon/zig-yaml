@@ -16,12 +16,14 @@ pub const Node = struct {
     pub const Tag = enum {
         Root,
         Doc,
+        Map,
     };
 
     pub fn deinit(self: *Node, allocator: *Allocator) void {
         switch (self.tag) {
             .Root => @fieldParentPtr(Node.Root, "base", self).deinit(allocator),
             .Doc => @fieldParentPtr(Node.Doc, "base", self).deinit(allocator),
+            .Map => @fieldParentPtr(Node.Map, "base", self).deinit(allocator),
         }
     }
 
@@ -52,6 +54,19 @@ pub const Node = struct {
                 allocator.destroy(node);
             }
             self.values.deinit(allocator);
+        }
+    };
+
+    pub const Map = struct {
+        base: Node = Node{ .tag = Tag.Map },
+        key: ?TokenIndex = null,
+        value: ?*Node = null,
+
+        pub fn deinit(self: *Map, allocator: *Allocator) void {
+            if (self.value) |value| {
+                value.deinit(allocator);
+                allocator.destroy(value);
+            }
         }
     };
 };
@@ -103,11 +118,8 @@ pub fn parse(allocator: *Allocator, source: []const u8) !Tree {
 const Parser = struct {
     allocator: *Allocator,
     token_it: *TokenIterator,
-    stack: std.ArrayListUnmanaged(*Node) = .{},
 
-    fn deinit(self: *Parser) void {
-        self.stack.deinit(self.allocator);
-    }
+    fn deinit(self: *Parser) void {}
 
     fn root(self: *Parser) !*Node.Root {
         var node = try self.allocator.create(Node.Root);
@@ -141,12 +153,10 @@ const Parser = struct {
             }
         }
 
+        _ = try self.expectToken(.NewLine);
+
         while (true) {
             const token = self.token_it.next();
-            if (token.id == .Eof) {
-                return error.UnexpectedEof;
-            }
-
             std.debug.print("{any}\n", .{token.id});
             switch (token.id) {
                 .DocStart => {
@@ -156,9 +166,21 @@ const Parser = struct {
                 .Tag => {
                     return error.UnexpectedTag;
                 },
+                .Literal => {
+                    const curr_pos = self.token_it.getPos();
+                    _ = try self.expectToken(.MapValueInd);
+                    try self.eatCommentsAndSpace();
+                    if (self.eatToken(.NewLine)) |tok| {}
+                    var map_node = try self.map();
+                    map_node.key = curr_pos;
+                    try node.values.append(self.allocator, &map_node.base);
+                },
                 .DocEnd => {
                     node.end = self.token_it.getPos();
                     break;
+                },
+                .Eof => {
+                    return error.UnexpectedEof;
                 },
                 else => {},
             }
@@ -167,13 +189,29 @@ const Parser = struct {
         return node;
     }
 
+    fn map(self: *Parser) !*Node.Map {
+        while (true) {
+            const token = self.token_it.next();
+        }
+    }
+
+    fn eatCommentsAndSpace(self: *Parser) !void {
+        while (true) {
+            const token = self.token_it.next();
+            switch (token.id) {
+                .Comment, .Space => {},
+                else => break,
+            }
+        }
+    }
+
     fn eatToken(self: *Parser, id: Token.Id) ?TokenIndex {
         while (true) {
             const cur_pos = self.token_it.getPos();
             _ = self.token_it.peek() orelse return null;
             const token = self.token_it.next();
             switch (token.id) {
-                .Comment, .NewLine, .Space => continue,
+                .Comment, .Space => continue,
                 else => |next_id| if (next_id == id) {
                     return self.token_it.getPos();
                 } else {
@@ -189,7 +227,7 @@ const Parser = struct {
             _ = self.token_it.peek() orelse return error.UnexpectedEof;
             const next = self.token_it.next();
             switch (next.id) {
-                .Comment, .NewLine, .Space => continue,
+                .Comment, .Space => continue,
                 else => |next_id| if (next_id != id) {
                     return error.UnexpectedToken;
                 } else {
@@ -203,6 +241,7 @@ const Parser = struct {
 test "hmm" {
     const source =
         \\--- !tapi-tbd
+        \\tbd-version:    4
         \\...
     ;
 
