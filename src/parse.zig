@@ -218,7 +218,6 @@ const Parser = struct {
                 }
             }
 
-            std.debug.print("\n\n", .{});
             const doc_node = try self.doc();
             try node.docs.append(self.allocator, &doc_node.base);
         }
@@ -242,10 +241,6 @@ const Parser = struct {
 
         while (true) {
             const token = self.token_it.next();
-            std.debug.print("{any} => {s}\n", .{
-                token.id,
-                self.tree.source[token.start..token.end],
-            });
             switch (token.id) {
                 .DocStart => {
                     // TODO this should be an error token
@@ -257,12 +252,6 @@ const Parser = struct {
                 .Literal => {
                     const curr_pos = self.token_it.getPos();
                     _ = try self.expectToken(.MapValueInd);
-                    self.eatCommentsAndSpace();
-                    if (self.eatToken(.NewLine)) |tok| {
-                        std.debug.print("...opening new scope", .{});
-                        std.debug.print("  | {any}", .{self.tree.tokens[tok]});
-                        // TODO verify indendation/scope
-                    }
                     const map_node = try self.map();
                     map_node.key = curr_pos;
                     try node.values.append(self.allocator, &map_node.base);
@@ -287,12 +276,13 @@ const Parser = struct {
         node.* = .{};
         node.base.tree = self.tree;
 
+        self.eatCommentsAndSpace();
+        if (self.eatToken(.NewLine)) |tok| {
+            // TODO verify indendation/scope
+        }
+
         while (true) {
             const token = self.token_it.next();
-            std.debug.print("  | {any} => {s}\n", .{
-                token.id,
-                self.tree.source[token.start..token.end],
-            });
             switch (token.id) {
                 .Literal => {
                     const value = try self.allocator.create(Node.Value);
@@ -302,10 +292,13 @@ const Parser = struct {
                     };
                     value.base.tree = self.tree;
                     node.value = &value.base;
+                    break;
                 },
                 else => return error.Unhandled,
             }
         }
+
+        _ = try self.expectToken(.NewLine);
 
         return node;
     }
@@ -317,7 +310,10 @@ const Parser = struct {
             const token = self.token_it.next();
             switch (token.id) {
                 .Comment, .Space => {},
-                else => break,
+                else => {
+                    self.token_it.resetTo(cur_pos);
+                    break;
+                },
             }
         }
     }
@@ -347,12 +343,12 @@ const Parser = struct {
 test "hmm" {
     const source =
         \\--- !tapi-tbd
-        // \\tbd-version: 4
+        \\tbd-version: 4
         \\...
     ;
 
     var tree = try parse(testing.allocator, source);
     defer tree.deinit();
 
-    std.debug.print("{}", .{tree.root});
+    std.debug.print("{}\n", .{tree.root});
 }

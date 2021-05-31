@@ -56,7 +56,7 @@ pub const TokenIterator = struct {
     }
 
     pub fn resetTo(self: *TokenIterator, pos: TokenIndex) void {
-        self.pos = pos;
+        self.pos = pos + 1;
     }
 
     pub fn advanceBy(self: *TokenIterator, offset: TokenIndex) void {
