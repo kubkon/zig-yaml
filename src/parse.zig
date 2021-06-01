@@ -18,6 +18,7 @@ pub const Node = struct {
         root,
         doc,
         map,
+        list,
         value,
     };
 
@@ -33,6 +34,7 @@ pub const Node = struct {
             .root => @fieldParentPtr(Node.Root, "base", self).deinit(allocator),
             .doc => @fieldParentPtr(Node.Doc, "base", self).deinit(allocator),
             .map => @fieldParentPtr(Node.Map, "base", self).deinit(allocator),
+            .list => @fieldParentPtr(Node.List, "base", self).deinit(allocator),
             .value => @fieldParentPtr(Node.Value, "base", self).deinit(allocator),
         }
     }
@@ -47,6 +49,7 @@ pub const Node = struct {
             .root => @fieldParentPtr(Node.Root, "base", self).format(fmt, options, writer),
             .doc => @fieldParentPtr(Node.Doc, "base", self).format(fmt, options, writer),
             .map => @fieldParentPtr(Node.Map, "base", self).format(fmt, options, writer),
+            .list => @fieldParentPtr(Node.List, "base", self).format(fmt, options, writer),
             .value => @fieldParentPtr(Node.Value, "base", self).format(fmt, options, writer),
         };
     }
@@ -74,7 +77,7 @@ pub const Node = struct {
         ) !void {
             try std.fmt.format(writer, "Root {{ .docs = [ ", .{});
             for (self.docs.items) |node| {
-                try std.fmt.format(writer, "{} ,", .{node});
+                try std.fmt.format(writer, "{}, ", .{node});
             }
             return std.fmt.format(writer, "] }}", .{});
         }
@@ -143,6 +146,36 @@ pub const Node = struct {
                 self.base.tree.source[key.start..key.end],
                 self.value.?,
             });
+        }
+    };
+
+    pub const List = struct {
+        base: Node = Node{ .tag = Tag.list, .tree = undefined },
+        start: ?TokenIndex = null,
+        end: ?TokenIndex = null,
+        values: std.ArrayListUnmanaged(*Node) = .{},
+
+        pub const base_tag: Node.Tag = .list;
+
+        pub fn deinit(self: *List, allocator: *Allocator) void {
+            for (self.values.items) |node| {
+                node.deinit(allocator);
+                allocator.destroy(node);
+            }
+            self.values.deinit(allocator);
+        }
+
+        pub fn format(
+            self: *const List,
+            comptime fmt: []const u8,
+            options: std.fmt.FormatOptions,
+            writer: anytype,
+        ) !void {
+            try std.fmt.format(writer, "List {{ .values = [ ", .{});
+            for (self.values.items) |node| {
+                try std.fmt.format(writer, "{}, ", .{node});
+            }
+            return std.fmt.format(writer, "] }}", .{});
         }
     };
 
@@ -312,20 +345,17 @@ const Parser = struct {
             break :indent token.count.?;
         } else null;
 
-        while (true) {
-            const token = self.token_it.next();
-            switch (token.id) {
-                .Literal => {
-                    if (indent) |_| {
-                        // nested map
-                        const curr_pos = self.token_it.getPos();
-                        _ = try self.expectToken(.MapValueInd);
-                        const map_node = try self.map();
-                        map_node.key = curr_pos;
-                        node.value = &map_node.base;
-                        break;
-                    }
-
+        const token = self.token_it.next();
+        switch (token.id) {
+            .Literal => {
+                if (indent) |_| {
+                    // nested map
+                    const curr_pos = self.token_it.getPos();
+                    _ = try self.expectToken(.MapValueInd);
+                    const map_node = try self.map();
+                    map_node.key = curr_pos;
+                    node.value = &map_node.base;
+                } else {
                     // standalone (leaf) value
                     const value = try self.allocator.create(Node.Value);
                     errdefer self.allocator.destroy(value);
@@ -334,15 +364,59 @@ const Parser = struct {
                     };
                     value.base.tree = self.tree;
                     node.value = &value.base;
-                    break;
-                },
-                else => return error.Unhandled,
-            }
+                }
+            },
+            .SeqItemInd => {
+                // list of values
+                const curr_pos = self.token_it.getPos();
+                self.eatCommentsAndSpace();
+                const list_node = try self.list(indent orelse 0);
+                list_node.start = curr_pos;
+                node.value = &list_node.base;
+            },
+            else => return error.UnexpectedToken,
         }
 
-        if (indent) |_| {
+        return node;
+    }
+
+    fn list(self: *Parser, indent: usize) !*Node.List {
+        const node = try self.allocator.create(Node.List);
+        errdefer self.allocator.destroy(node);
+        node.* = .{};
+        node.base.tree = self.tree;
+
+        while (true) {
+            const token = self.token_it.next();
+            switch (token.id) {
+                .Literal => {
+                    const curr_pos = self.token_it.getPos();
+                    if (self.eatToken(.MapValueInd)) |_| {
+                        // nested map
+                        const map_node = try self.map();
+                        map_node.key = curr_pos;
+                        try node.values.append(self.allocator, &map_node.base);
+                    } else {
+                        // standalone (leaf) value
+                        const value = try self.allocator.create(Node.Value);
+                        errdefer self.allocator.destroy(value);
+                        value.* = .{
+                            .value = self.token_it.getPos(),
+                        };
+                        value.base.tree = self.tree;
+                        try node.values.append(self.allocator, &value.base);
+                    }
+                },
+                else => return error.UnexpectedToken,
+            }
+
             _ = try self.expectToken(.NewLine);
+            if (self.eatToken(.SeqItemInd)) |_| {
+                // TODO verify indentation level
+            } else break;
         }
+
+        node.end = self.token_it.getPos();
 
         return node;
     }
@@ -421,9 +495,9 @@ test "nested maps" {
     const source =
         \\---
         \\key1:
-        \\  key1_1:value1_1
-        \\key2:
-        \\  key2_1:value2_1
+        \\  key1_1 : value1_1
+        \\key2   :
+        \\  key2_1  :value2_1
         \\...
     ;
 
@@ -481,4 +555,20 @@ test "nested maps" {
             tree.source[value2_1_tok.start..value2_1_tok.end],
         ));
     }
+}
+
+test "map of list of values" {
+    const source =
+        \\---
+        \\key1:
+        \\  - key2 : value2
+        \\  - key3 : value3
+        \\  - key4 : value4
+        \\...
+    ;
+
+    var tree = try parse(testing.allocator, source);
+    defer tree.deinit();
+
+    std.debug.print("{}\n", .{tree.root});
 }
