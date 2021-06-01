@@ -11,6 +11,9 @@ pub const Token = struct {
     id: Id,
     start: usize,
     end: usize,
+    // Count of spaces/tabs.
+    // Only active for .Space and .Tab tokens.
+    count: ?usize = null,
 
     pub const Id = enum {
         Eof,
@@ -27,6 +30,7 @@ pub const Token = struct {
 
         Comma,
         Space,
+        Tab,
         Comment, // #
         Alias, // *
         Anchor, // &
@@ -79,8 +83,9 @@ pub fn next(self: *Tokenizer) Token {
 
     var state: union(enum) {
         Start,
-        Space,
         NewLine,
+        Space: usize,
+        Tab: usize,
         Hyphen: usize,
         Dot: usize,
         Literal,
@@ -90,8 +95,11 @@ pub fn next(self: *Tokenizer) Token {
         const c = self.buffer[self.index];
         switch (state) {
             .Start => switch (c) {
-                ' ', '\t' => {
-                    state = .Space;
+                ' ' => {
+                    state = .{ .Space = 1 };
+                },
+                '\t' => {
+                    state = .{ .Tab = 1 };
                 },
                 '\n' => {
                     result.id = .NewLine;
@@ -171,6 +179,26 @@ pub fn next(self: *Tokenizer) Token {
                     state = .Literal;
                 },
             },
+            .Space => |*count| switch (c) {
+                ' ' => {
+                    count.* += 1;
+                },
+                else => {
+                    result.id = .Space;
+                    result.count = count.*;
+                    break;
+                },
+            },
+            .Tab => |*count| switch (c) {
+                ' ' => {
+                    count.* += 1;
+                },
+                else => {
+                    result.id = .Tab;
+                    result.count = count.*;
+                    break;
+                },
+            },
             .NewLine => switch (c) {
                 '\n' => {
                     result.id = .NewLine;
@@ -178,13 +206,6 @@ pub fn next(self: *Tokenizer) Token {
                     break;
                 },
                 else => {}, // TODO this should be an error condition
-            },
-            .Space => switch (c) {
-                ' ', '\t' => {},
-                else => {
-                    result.id = .Space;
-                    break;
-                },
             },
             .Hyphen => |*count| switch (c) {
                 ' ' => {
