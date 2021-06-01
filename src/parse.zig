@@ -21,8 +21,6 @@ pub const Node = struct {
         Value,
     };
 
-    pub const Error = std.os.WriteError;
-
     pub fn deinit(self: *Node, allocator: *Allocator) void {
         switch (self.tag) {
             .Root => @fieldParentPtr(Node.Root, "base", self).deinit(allocator),
@@ -94,10 +92,14 @@ pub const Node = struct {
             options: std.fmt.FormatOptions,
             writer: anytype,
         ) !void {
-            const directive = self.base.tree.tokens[self.directive.?];
-            try std.fmt.format(writer, "Doc {{ .directive = {s}, .values = [ ", .{
-                self.base.tree.source[directive.start..directive.end],
-            });
+            try std.fmt.format(writer, "Doc {{ ", .{});
+            if (self.directive) |id| {
+                const directive = self.base.tree.tokens[id];
+                try std.fmt.format(writer, ".directive = {s}, ", .{
+                    self.base.tree.source[directive.start..directive.end],
+                });
+            }
+            try std.fmt.format(writer, ".values = [ ", .{});
             for (self.values.items) |node| {
                 try std.fmt.format(writer, "{} ,", .{node});
             }
@@ -201,9 +203,17 @@ const Parser = struct {
     tree: *Tree,
     token_it: *TokenIterator,
 
+    const ParseError = error{
+        NestedDocuments,
+        UnexpectedTag,
+        UnexpectedEof,
+        UnexpectedToken,
+        Unhandled,
+    } || Allocator.Error;
+
     fn deinit(self: *Parser) void {}
 
-    fn root(self: *Parser) !*Node.Root {
+    fn root(self: *Parser) ParseError!*Node.Root {
         const node = try self.allocator.create(Node.Root);
         errdefer self.allocator.destroy(node);
         node.* = .{};
@@ -225,7 +235,7 @@ const Parser = struct {
         return node;
     }
 
-    fn doc(self: *Parser) !*Node.Doc {
+    fn doc(self: *Parser) ParseError!*Node.Doc {
         const node = try self.allocator.create(Node.Doc);
         errdefer self.allocator.destroy(node);
         node.* = .{};
@@ -270,21 +280,36 @@ const Parser = struct {
         return node;
     }
 
-    fn map(self: *Parser) !*Node.Map {
+    fn map(self: *Parser) ParseError!*Node.Map {
         const node = try self.allocator.create(Node.Map);
         errdefer self.allocator.destroy(node);
         node.* = .{};
         node.base.tree = self.tree;
 
-        self.eatCommentsAndSpace();
-        if (self.eatToken(.NewLine)) |tok| {
-            // TODO verify indendation/scope
-        }
+        const indent: ?usize = if (self.eatToken(.NewLine)) |_| indent: {
+            const token = self.token_it.next();
+            if (token.id != .Space and token.id != .Tab) {
+                // TODO bubble up error
+                return error.UnexpectedToken;
+            }
+            break :indent token.count.?;
+        } else null;
 
         while (true) {
             const token = self.token_it.next();
             switch (token.id) {
                 .Literal => {
+                    if (indent) |_| {
+                        // nested map
+                        const curr_pos = self.token_it.getPos();
+                        _ = try self.expectToken(.MapValueInd);
+                        const map_node = try self.map();
+                        map_node.key = curr_pos;
+                        node.value = &map_node.base;
+                        break;
+                    }
+
+                    // standalone (leaf) value
                     const value = try self.allocator.create(Node.Value);
                     errdefer self.allocator.destroy(value);
                     value.* = .{
@@ -298,7 +323,9 @@ const Parser = struct {
             }
         }
 
-        _ = try self.expectToken(.NewLine);
+        if (indent) |_| {
+            _ = try self.expectToken(.NewLine);
+        }
 
         return node;
     }
@@ -335,10 +362,26 @@ const Parser = struct {
         }
     }
 
-    fn expectToken(self: *Parser, id: Token.Id) !TokenIndex {
+    fn expectToken(self: *Parser, id: Token.Id) ParseError!TokenIndex {
         return self.eatToken(id) orelse error.UnexpectedToken;
     }
 };
+
+test "nested maps" {
+    const source =
+        \\---
+        \\key1:
+        \\  key1_1:value1
+        \\key2:
+        \\  key2_1:value2
+        \\...
+    ;
+
+    var tree = try parse(testing.allocator, source);
+    defer tree.deinit();
+
+    std.debug.print("{}\n", .{tree.root});
+}
 
 test "hmm" {
     const source =
