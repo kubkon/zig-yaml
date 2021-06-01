@@ -15,18 +15,25 @@ pub const Node = struct {
     tree: *const Tree,
 
     pub const Tag = enum {
-        Root,
-        Doc,
-        Map,
-        Value,
+        root,
+        doc,
+        map,
+        value,
     };
+
+    pub fn cast(self: *Node, comptime T: type) ?*T {
+        if (self.tag != T.base_tag) {
+            return null;
+        }
+        return @fieldParentPtr(T, "base", self);
+    }
 
     pub fn deinit(self: *Node, allocator: *Allocator) void {
         switch (self.tag) {
-            .Root => @fieldParentPtr(Node.Root, "base", self).deinit(allocator),
-            .Doc => @fieldParentPtr(Node.Doc, "base", self).deinit(allocator),
-            .Map => @fieldParentPtr(Node.Map, "base", self).deinit(allocator),
-            .Value => @fieldParentPtr(Node.Value, "base", self).deinit(allocator),
+            .root => @fieldParentPtr(Node.Root, "base", self).deinit(allocator),
+            .doc => @fieldParentPtr(Node.Doc, "base", self).deinit(allocator),
+            .map => @fieldParentPtr(Node.Map, "base", self).deinit(allocator),
+            .value => @fieldParentPtr(Node.Value, "base", self).deinit(allocator),
         }
     }
 
@@ -37,17 +44,19 @@ pub const Node = struct {
         writer: anytype,
     ) !void {
         return switch (self.tag) {
-            .Root => @fieldParentPtr(Node.Root, "base", self).format(fmt, options, writer),
-            .Doc => @fieldParentPtr(Node.Doc, "base", self).format(fmt, options, writer),
-            .Map => @fieldParentPtr(Node.Map, "base", self).format(fmt, options, writer),
-            .Value => @fieldParentPtr(Node.Value, "base", self).format(fmt, options, writer),
+            .root => @fieldParentPtr(Node.Root, "base", self).format(fmt, options, writer),
+            .doc => @fieldParentPtr(Node.Doc, "base", self).format(fmt, options, writer),
+            .map => @fieldParentPtr(Node.Map, "base", self).format(fmt, options, writer),
+            .value => @fieldParentPtr(Node.Value, "base", self).format(fmt, options, writer),
         };
     }
 
     pub const Root = struct {
-        base: Node = Node{ .tag = Tag.Root, .tree = undefined },
+        base: Node = Node{ .tag = Tag.root, .tree = undefined },
         docs: std.ArrayListUnmanaged(*Node) = .{},
         eof: ?TokenIndex = null,
+
+        pub const base_tag: Node.Tag = .root;
 
         pub fn deinit(self: *Root, allocator: *Allocator) void {
             for (self.docs.items) |node| {
@@ -72,11 +81,13 @@ pub const Node = struct {
     };
 
     pub const Doc = struct {
-        base: Node = Node{ .tag = Tag.Doc, .tree = undefined },
+        base: Node = Node{ .tag = Tag.doc, .tree = undefined },
         start: ?TokenIndex = null,
         directive: ?TokenIndex = null,
         values: std.ArrayListUnmanaged(*Node) = .{},
         end: ?TokenIndex = null,
+
+        pub const base_tag: Node.Tag = .doc;
 
         pub fn deinit(self: *Doc, allocator: *Allocator) void {
             for (self.values.items) |node| {
@@ -108,9 +119,11 @@ pub const Node = struct {
     };
 
     pub const Map = struct {
-        base: Node = Node{ .tag = Tag.Map, .tree = undefined },
+        base: Node = Node{ .tag = Tag.map, .tree = undefined },
         key: ?TokenIndex = null,
         value: ?*Node = null,
+
+        pub const base_tag: Node.Tag = .map;
 
         pub fn deinit(self: *Map, allocator: *Allocator) void {
             if (self.value) |value| {
@@ -134,8 +147,10 @@ pub const Node = struct {
     };
 
     pub const Value = struct {
-        base: Node = Node{ .tag = Tag.Value, .tree = undefined },
+        base: Node = Node{ .tag = Tag.value, .tree = undefined },
         value: ?TokenIndex = null,
+
+        pub const base_tag: Node.Tag = .value;
 
         pub fn deinit(self: *Value, allocator: *Allocator) void {}
 
@@ -228,7 +243,9 @@ const Parser = struct {
                 }
             }
 
+            const curr_pos = self.token_it.getPos();
             const doc_node = try self.doc();
+            doc_node.start = curr_pos;
             try node.docs.append(self.allocator, &doc_node.base);
         }
 
@@ -367,23 +384,7 @@ const Parser = struct {
     }
 };
 
-test "nested maps" {
-    const source =
-        \\---
-        \\key1:
-        \\  key1_1:value1
-        \\key2:
-        \\  key2_1:value2
-        \\...
-    ;
-
-    var tree = try parse(testing.allocator, source);
-    defer tree.deinit();
-
-    std.debug.print("{}\n", .{tree.root});
-}
-
-test "hmm" {
+test "simple doc with single map and directive" {
     const source =
         \\--- !tapi-tbd
         \\tbd-version: 4
@@ -393,5 +394,91 @@ test "hmm" {
     var tree = try parse(testing.allocator, source);
     defer tree.deinit();
 
-    std.debug.print("{}\n", .{tree.root});
+    try testing.expectEqual(tree.root.docs.items.len, 1);
+
+    const doc = tree.root.docs.items[0].cast(Node.Doc).?;
+    try testing.expectEqual(doc.start.?, 0);
+    try testing.expectEqual(doc.end.?, tree.tokens.len - 2);
+
+    const directive = tree.tokens[doc.directive.?];
+    try testing.expectEqual(directive.id, .Literal);
+    try testing.expect(mem.eql(u8, "tapi-tbd", tree.source[directive.start..directive.end]));
+
+    try testing.expectEqual(doc.values.items.len, 1);
+
+    const map = doc.values.items[0].cast(Node.Map).?;
+    const key = tree.tokens[map.key.?];
+    try testing.expectEqual(key.id, .Literal);
+    try testing.expect(mem.eql(u8, "tbd-version", tree.source[key.start..key.end]));
+
+    const value = map.value.?.cast(Node.Value).?;
+    const value_tok = tree.tokens[value.value.?];
+    try testing.expectEqual(value_tok.id, .Literal);
+    try testing.expect(mem.eql(u8, "4", tree.source[value_tok.start..value_tok.end]));
+}
+
+test "nested maps" {
+    const source =
+        \\---
+        \\key1:
+        \\  key1_1:value1_1
+        \\key2:
+        \\  key2_1:value2_1
+        \\...
+    ;
+
+    var tree = try parse(testing.allocator, source);
+    defer tree.deinit();
+
+    try testing.expectEqual(tree.root.docs.items.len, 1);
+
+    const doc = tree.root.docs.items[0].cast(Node.Doc).?;
+    try testing.expectEqual(doc.start.?, 0);
+    try testing.expectEqual(doc.end.?, tree.tokens.len - 2);
+    try testing.expect(doc.directive == null);
+    try testing.expectEqual(doc.values.items.len, 2);
+
+    {
+        // first value: map: key1 => { key1_1 => value1 }
+        const map = doc.values.items[0].cast(Node.Map).?;
+        const key1 = tree.tokens[map.key.?];
+        try testing.expectEqual(key1.id, .Literal);
+        try testing.expect(mem.eql(u8, "key1", tree.source[key1.start..key1.end]));
+
+        const value1 = map.value.?.cast(Node.Map).?;
+        const key1_1 = tree.tokens[value1.key.?];
+        try testing.expectEqual(key1_1.id, .Literal);
+        try testing.expect(mem.eql(u8, "key1_1", tree.source[key1_1.start..key1_1.end]));
+
+        const value1_1 = value1.value.?.cast(Node.Value).?;
+        const value1_1_tok = tree.tokens[value1_1.value.?];
+        try testing.expectEqual(value1_1_tok.id, .Literal);
+        try testing.expect(mem.eql(
+            u8,
+            "value1_1",
+            tree.source[value1_1_tok.start..value1_1_tok.end],
+        ));
+    }
+
+    {
+        // second value: map: key2 => { key2_1 => value2 }
+        const map = doc.values.items[1].cast(Node.Map).?;
+        const key2 = tree.tokens[map.key.?];
+        try testing.expectEqual(key2.id, .Literal);
+        try testing.expect(mem.eql(u8, "key2", tree.source[key2.start..key2.end]));
+
+        const value2 = map.value.?.cast(Node.Map).?;
+        const key2_1 = tree.tokens[value2.key.?];
+        try testing.expectEqual(key2_1.id, .Literal);
+        try testing.expect(mem.eql(u8, "key2_1", tree.source[key2_1.start..key2_1.end]));
+
+        const value2_1 = value2.value.?.cast(Node.Value).?;
+        const value2_1_tok = tree.tokens[value2_1.value.?];
+        try testing.expectEqual(value2_1_tok.id, .Literal);
+        try testing.expect(mem.eql(
+            u8,
+            "value2_1",
+            tree.source[value2_1_tok.start..value2_1_tok.end],
+        ));
+    }
 }
