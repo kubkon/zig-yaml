@@ -1,0 +1,12 @@
+#!/bin/sh
+
+set -x
+set -e
+
+ZIG="zig-linux-x86_64-0.8.0-dev.2667+44de88498"
+
+wget -nv "https://ziglang.org/builds/$ZIG.tar.xz"
+tar xf "$ZIG.tar.xz"
+export PATH="$(pwd)/$ZIG:$PATH"
+
+zig build test

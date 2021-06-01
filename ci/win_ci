@@ -1,0 +1,13 @@
+#!/bin/sh
+
+set -x
+set -e
+
+ZIG="zig-windows-x86_64-0.8.0-dev.2667+44de88498"
+
+curl -L "https://ziglang.org/builds/$ZIG.zip" -o "$ZIG.zip"
+7z x "$ZIG.zip"
+export PATH="$(pwd)/$ZIG:$PATH"
+
+zig build test
+
