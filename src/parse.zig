@@ -337,12 +337,11 @@ const Parser = struct {
         node.base.tree = self.tree;
 
         const indent: ?usize = if (self.eatToken(.NewLine)) |_| indent: {
-            const token = self.token_it.next();
-            if (token.id != .Space and token.id != .Tab) {
-                // TODO bubble up error
-                return error.UnexpectedToken;
+            const peek = self.token_it.peek() orelse return error.UnexpectedEof;
+            if (peek.id != .Space and peek.id != .Tab) {
+                break :indent 0;
             }
-            break :indent token.count.?;
+            break :indent self.token_it.next().count.?;
         } else null;
 
         const token = self.token_it.next();
@@ -560,15 +559,123 @@ test "nested maps" {
 test "map of list of values" {
     const source =
         \\---
+        \\ints:
+        \\    - 0
+        \\    - 1
+        \\    - 2
+        \\...
+    ;
+    var tree = try parse(testing.allocator, source);
+    defer tree.deinit();
+
+    try testing.expectEqual(tree.root.docs.items.len, 1);
+
+    const doc = tree.root.docs.items[0].cast(Node.Doc).?;
+    try testing.expectEqual(doc.start.?, 0);
+    try testing.expectEqual(doc.end.?, tree.tokens.len - 2);
+    try testing.expect(doc.directive == null);
+    try testing.expectEqual(doc.values.items.len, 1);
+
+    const map = doc.values.items[0].cast(Node.Map).?;
+    const key = tree.tokens[map.key.?];
+    try testing.expectEqual(key.id, .Literal);
+    try testing.expect(mem.eql(u8, "ints", tree.source[key.start..key.end]));
+
+    const list = map.value.?.cast(Node.List).?;
+    try testing.expectEqual(list.start.?, 6);
+    try testing.expectEqual(tree.tokens[list.start.?].id, .SeqItemInd);
+    try testing.expectEqual(list.end.?, 16);
+    try testing.expectEqual(tree.tokens[list.end.?].id, .NewLine);
+    try testing.expectEqual(list.values.items.len, 3);
+
+    {
+        const elem = list.values.items[0].cast(Node.Value).?;
+        const value = tree.tokens[elem.value.?];
+        try testing.expectEqual(value.id, .Literal);
+        try testing.expect(mem.eql(u8, "0", tree.source[value.start..value.end]));
+    }
+
+    {
+        const elem = list.values.items[1].cast(Node.Value).?;
+        const value = tree.tokens[elem.value.?];
+        try testing.expectEqual(value.id, .Literal);
+        try testing.expect(mem.eql(u8, "1", tree.source[value.start..value.end]));
+    }
+
+    {
+        const elem = list.values.items[2].cast(Node.Value).?;
+        const value = tree.tokens[elem.value.?];
+        try testing.expectEqual(value.id, .Literal);
+        try testing.expect(mem.eql(u8, "2", tree.source[value.start..value.end]));
+    }
+}
+
+test "map of list of maps" {
+    const source =
+        \\---
         \\key1:
-        \\  - key2 : value2
-        \\  - key3 : value3
-        \\  - key4 : value4
+        \\- key2 : value2
+        \\- key3 : value3
+        \\- key4 : value4
         \\...
     ;
 
     var tree = try parse(testing.allocator, source);
     defer tree.deinit();
 
-    std.debug.print("{}\n", .{tree.root});
+    try testing.expectEqual(tree.root.docs.items.len, 1);
+
+    const doc = tree.root.docs.items[0].cast(Node.Doc).?;
+    try testing.expectEqual(doc.start.?, 0);
+    try testing.expectEqual(doc.end.?, tree.tokens.len - 2);
+    try testing.expect(doc.directive == null);
+    try testing.expectEqual(doc.values.items.len, 1);
+
+    const map = doc.values.items[0].cast(Node.Map).?;
+    const key = tree.tokens[map.key.?];
+    try testing.expectEqual(key.id, .Literal);
+    try testing.expect(mem.eql(u8, "key1", tree.source[key.start..key.end]));
+
+    const list = map.value.?.cast(Node.List).?;
+    try testing.expectEqual(list.start.?, 5);
+    try testing.expectEqual(tree.tokens[list.start.?].id, .SeqItemInd);
+    try testing.expectEqual(list.end.?, 25);
+    try testing.expectEqual(tree.tokens[list.end.?].id, .NewLine);
+    try testing.expectEqual(list.values.items.len, 3);
+
+    {
+        const elem = list.values.items[0].cast(Node.Map).?;
+        const key_tok = tree.tokens[elem.key.?];
+        try testing.expectEqual(key_tok.id, .Literal);
+        try testing.expect(mem.eql(u8, "key2", tree.source[key_tok.start..key_tok.end]));
+
+        const value = elem.value.?.cast(Node.Value).?;
+        const value_tok = tree.tokens[value.value.?];
+        try testing.expectEqual(value_tok.id, .Literal);
+        try testing.expect(mem.eql(u8, "value2", tree.source[value_tok.start..value_tok.end]));
+    }
+
+    {
+        const elem = list.values.items[1].cast(Node.Map).?;
+        const key_tok = tree.tokens[elem.key.?];
+        try testing.expectEqual(key_tok.id, .Literal);
+        try testing.expect(mem.eql(u8, "key3", tree.source[key_tok.start..key_tok.end]));
+
+        const value = elem.value.?.cast(Node.Value).?;
+        const value_tok = tree.tokens[value.value.?];
+        try testing.expectEqual(value_tok.id, .Literal);
+        try testing.expect(mem.eql(u8, "value3", tree.source[value_tok.start..value_tok.end]));
+    }
+
+    {
+        const elem = list.values.items[2].cast(Node.Map).?;
+        const key_tok = tree.tokens[elem.key.?];
+        try testing.expectEqual(key_tok.id, .Literal);
+        try testing.expect(mem.eql(u8, "key4", tree.source[key_tok.start..key_tok.end]));
+
+        const value = elem.value.?.cast(Node.Value).?;
+        const value_tok = tree.tokens[value.value.?];
+        try testing.expectEqual(value_tok.id, .Literal);
+        try testing.expect(mem.eql(u8, "value4", tree.source[value_tok.start..value_tok.end]));
+    }
 }
