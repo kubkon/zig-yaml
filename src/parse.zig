@@ -207,44 +207,45 @@ pub const Tree = struct {
     tokens: []Token,
     root: *Node.Root,
 
+    pub fn init(allocator: *Allocator) Tree {
+        return .{
+            .allocator = allocator,
+            .source = undefined,
+            .tokens = undefined,
+            .root = undefined,
+        };
+    }
+
     pub fn deinit(self: *Tree) void {
         self.allocator.free(self.tokens);
         self.root.deinit(self.allocator);
         self.allocator.destroy(self.root);
     }
-};
 
-pub fn parse(allocator: *Allocator, source: []const u8) !Tree {
-    var tokenizer = Tokenizer{
-        .buffer = source,
-    };
-    var tokens = std.ArrayList(Token).init(allocator);
+    pub fn parse(self: *Tree, source: []const u8) !void {
+        var tokenizer = Tokenizer{ .buffer = source };
+        var tokens = std.ArrayList(Token).init(self.allocator);
+        errdefer tokens.deinit();
 
-    while (true) {
-        const token = tokenizer.next();
-        try tokens.append(token);
-        if (token.id == .Eof) break;
+        while (true) {
+            const token = tokenizer.next();
+            try tokens.append(token);
+            if (token.id == .Eof) break;
+        }
+
+        self.source = source;
+        self.tokens = tokens.toOwnedSlice();
+
+        var it = TokenIterator{ .buffer = self.tokens };
+        var parser = Parser{
+            .allocator = self.allocator,
+            .tree = self,
+            .token_it = &it,
+        };
+        defer parser.deinit();
+        self.root = try parser.root();
     }
-
-    var tree = Tree{
-        .allocator = allocator,
-        .source = source,
-        .tokens = tokens.toOwnedSlice(),
-        .root = undefined,
-    };
-    var it = TokenIterator{
-        .buffer = tree.tokens,
-    };
-    var parser = Parser{
-        .allocator = allocator,
-        .tree = &tree,
-        .token_it = &it,
-    };
-    defer parser.deinit();
-    tree.root = try parser.root();
-
-    return tree;
-}
+};
 
 const Parser = struct {
     allocator: *Allocator,
@@ -464,8 +465,9 @@ test "simple doc with single map and directive" {
         \\...
     ;
 
-    var tree = try parse(testing.allocator, source);
+    var tree = Tree.init(testing.allocator);
     defer tree.deinit();
+    try tree.parse(source);
 
     try testing.expectEqual(tree.root.docs.items.len, 1);
 
@@ -500,8 +502,9 @@ test "nested maps" {
         \\...
     ;
 
-    var tree = try parse(testing.allocator, source);
+    var tree = Tree.init(testing.allocator);
     defer tree.deinit();
+    try tree.parse(source);
 
     try testing.expectEqual(tree.root.docs.items.len, 1);
 
@@ -565,8 +568,9 @@ test "map of list of values" {
         \\    - 2
         \\...
     ;
-    var tree = try parse(testing.allocator, source);
+    var tree = Tree.init(testing.allocator);
     defer tree.deinit();
+    try tree.parse(source);
 
     try testing.expectEqual(tree.root.docs.items.len, 1);
 
@@ -620,8 +624,9 @@ test "map of list of maps" {
         \\...
     ;
 
-    var tree = try parse(testing.allocator, source);
+    var tree = Tree.init(testing.allocator);
     defer tree.deinit();
+    try tree.parse(source);
 
     try testing.expectEqual(tree.root.docs.items.len, 1);
 
