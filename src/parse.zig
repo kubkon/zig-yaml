@@ -29,6 +29,13 @@ pub const Node = struct {
         return @fieldParentPtr(T, "base", self);
     }
 
+    pub fn constCast(self: *const Node, comptime T: type) ?*const T {
+        if (self.tag != T.base_tag) {
+            return null;
+        }
+        return @fieldParentPtr(T, "base", self);
+    }
+
     pub fn deinit(self: *Node, allocator: *Allocator) void {
         switch (self.tag) {
             .root => @fieldParentPtr(Node.Root, "base", self).deinit(allocator),
