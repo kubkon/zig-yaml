@@ -231,7 +231,6 @@ pub const Tree = struct {
             const curr_pos = parser.token_it.pos;
             const next = parser.token_it.peek() orelse break;
             if (next.id == .Eof) {
-                log.debug("found Eof; stopping...", .{});
                 _ = parser.token_it.next();
                 break;
             }
@@ -275,19 +274,13 @@ const Parser = struct {
 
         self.token_it.seekTo(start);
 
-        log.debug("Doc", .{});
-        log.debug("  | start = {}", .{start});
+        log.debug("Doc start: {}, {}", .{ start, self.tree.tokens[start] });
 
         const explicit_doc: bool = if (self.eatToken(.DocStart)) |_| explicit_doc: {
-            log.debug("  | found explicit {s}: ---", .{.DocStart});
-
             if (self.eatToken(.Tag)) |_| {
                 node.directive = try self.expectToken(.Literal);
-                log.debug("  | found directive", .{});
             }
-
             _ = try self.expectToken(.NewLine);
-
             break :explicit_doc true;
         } else false;
 
@@ -295,8 +288,7 @@ const Parser = struct {
             const pos = self.token_it.pos;
             const token = self.token_it.next();
 
-            log.debug("  | pos = {}", .{pos});
-            log.debug("  | token = {}", .{token});
+            log.debug("Next token: {}, {}", .{ pos, token });
 
             switch (token.id) {
                 .DocStart => {
@@ -310,6 +302,10 @@ const Parser = struct {
                     _ = try self.expectToken(.MapValueInd);
                     const map_node = try self.map(pos);
                     node.value = &map_node.base;
+                },
+                .SeqItemInd => {
+                    const list_node = try self.list(pos);
+                    node.value = &list_node.base;
                 },
                 .DocEnd => {
                     if (explicit_doc) break;
@@ -325,8 +321,7 @@ const Parser = struct {
 
         node.end = self.token_it.pos - 1;
 
-        log.debug("  | end = {}", .{node.end.?});
-        log.debug("  | Doc end = {}", .{self.tree.tokens[node.end.?]});
+        log.debug("Doc end: {}, {}", .{ node.end.?, self.tree.tokens[node.end.?] });
 
         return node;
     }
@@ -341,9 +336,8 @@ const Parser = struct {
 
         self.token_it.seekTo(start);
 
-        log.debug("Map", .{});
-        log.debug("  | current scope = {}", .{self.scopes.items[self.scopes.items.len - 1]});
-        log.debug("  | start = {}", .{start});
+        log.debug("Map start: {}, {}", .{ start, self.tree.tokens[start] });
+        log.debug("Current scope: {}", .{self.scopes.items[self.scopes.items.len - 1]});
 
         while (true) {
             // Parse key.
@@ -362,7 +356,7 @@ const Parser = struct {
                 },
             }
 
-            log.debug("  | key: {{ {}, '{s}' }}", .{ key, self.tree.source[key.start..key.end] });
+            log.debug("Map key: {}, '{s}'", .{ key, self.tree.source[key.start..key.end] });
 
             // Separator
             _ = try self.expectToken(.MapValueInd);
@@ -372,25 +366,7 @@ const Parser = struct {
             const value: *Node = value: {
                 if (self.eatToken(.NewLine)) |_| {
                     // Explicit, complex value such as list or map.
-                    {
-                        const peek = self.token_it.peek() orelse return error.UnexpectedEof;
-
-                        if (peek.id != .Space and peek.id != .Tab) {
-                            return error.UnexpectedToken;
-                        }
-
-                        const indent = self.token_it.next().count.?;
-                        const prev_scope = self.scopes.items[self.scopes.items.len - 1];
-
-                        if (indent < prev_scope.indent) {
-                            return error.MalformedYaml;
-                        }
-
-                        try self.scopes.append(self.allocator, .{
-                            .indent = indent,
-                        });
-                    }
-
+                    try self.openScope();
                     const value_pos = self.token_it.pos;
                     const value = self.token_it.next();
                     switch (value.id) {
@@ -419,7 +395,7 @@ const Parser = struct {
                     }
                 }
             };
-            log.debug("  | value: {}", .{value});
+            log.debug("Map value: {}", .{value});
 
             try node.values.append(self.allocator, .{
                 .key = key_pos,
@@ -427,23 +403,7 @@ const Parser = struct {
             });
 
             if (self.eatToken(.NewLine)) |_| {
-                const indent = indent: {
-                    const peek = self.token_it.peek() orelse return error.UnexpectedEof;
-                    log.debug("peek = {}", .{peek});
-                    switch (peek.id) {
-                        .Space, .Tab => {
-                            break :indent self.token_it.next().count.?;
-                        },
-                        else => {
-                            break :indent 0;
-                        },
-                    }
-                };
-
-                const scope = self.scopes.items[self.scopes.items.len - 1];
-                if (indent < scope.indent) {
-                    log.debug("closing scope...", .{});
-                    _ = self.scopes.pop();
+                if (try self.closeScope()) {
                     break;
                 }
             }
@@ -451,8 +411,7 @@ const Parser = struct {
 
         node.end = self.token_it.pos - 1;
 
-        log.debug("  | end = {}", .{node.end.?});
-        log.debug("  | Map end = {}", .{self.tree.tokens[node.end.?]});
+        log.debug("Map end: {}, {}", .{ node.end.?, self.tree.tokens[node.end.?] });
 
         return node;
     }
@@ -467,24 +426,30 @@ const Parser = struct {
 
         self.token_it.seekTo(start);
 
-        log.debug("List", .{});
-        log.debug("  | start = {}", .{start});
+        log.debug("List start: {}, {}", .{ start, self.tree.tokens[start] });
+        log.debug("Current scope: {}", .{self.scopes.items[self.scopes.items.len - 1]});
 
         while (true) {
-            _ = self.eatToken(.SeqItemInd) orelse break;
+            _ = self.eatToken(.SeqItemInd) orelse {
+                _ = try self.closeScope();
+                break;
+            };
 
+            const pos = self.token_it.pos;
             const token = self.token_it.next();
             const value: *Node = value: {
                 switch (token.id) {
                     .Literal => {
-                        const curr_pos = self.token_it.pos;
                         if (self.eatToken(.MapValueInd)) |_| {
+                            if (self.eatToken(.NewLine)) |_| {
+                                try self.openScope();
+                            }
                             // nested map
-                            const map_node = try self.map(curr_pos);
+                            const map_node = try self.map(pos);
                             break :value &map_node.base;
                         } else {
                             // standalone (leaf) value
-                            const leaf_node = try self.leaf_value(curr_pos);
+                            const leaf_node = try self.leaf_value(pos);
                             break :value &leaf_node.base;
                         }
                     },
@@ -494,10 +459,11 @@ const Parser = struct {
             try node.values.append(self.allocator, value);
 
             _ = try self.expectToken(.NewLine);
-            node.end = self.token_it.pos - 1;
         }
 
-        log.debug("  | end = {}", .{node.end.?});
+        node.end = self.token_it.pos - 1;
+
+        log.debug("List end: {}, {}", .{ node.end.?, self.tree.tokens[node.end.?] });
 
         return node;
     }
@@ -513,10 +479,50 @@ const Parser = struct {
         self.token_it.seekTo(start);
         const token = self.token_it.next();
 
-        log.debug("Leaf", .{});
-        log.debug("  | {{ {}, '{s}' }}", .{ token, self.tree.source[token.start..token.end] });
+        log.debug("Leaf value: {}, '{s}'", .{ token, self.tree.source[token.start..token.end] });
 
         return node;
+    }
+
+    fn openScope(self: *Parser) !void {
+        const peek = self.token_it.peek() orelse return error.UnexpectedEof;
+        if (peek.id != .Space and peek.id != .Tab) {
+            return error.UnexpectedToken;
+        }
+        const indent = self.token_it.next().count.?;
+        const prev_scope = self.scopes.items[self.scopes.items.len - 1];
+        if (indent < prev_scope.indent) {
+            return error.MalformedYaml;
+        }
+
+        log.debug("Opening scope...", .{});
+
+        try self.scopes.append(self.allocator, .{
+            .indent = indent,
+        });
+    }
+
+    fn closeScope(self: *Parser) !bool {
+        const indent = indent: {
+            const peek = self.token_it.peek() orelse return error.UnexpectedEof;
+            switch (peek.id) {
+                .Space, .Tab => {
+                    break :indent self.token_it.next().count.?;
+                },
+                else => {
+                    break :indent 0;
+                },
+            }
+        };
+
+        const scope = self.scopes.items[self.scopes.items.len - 1];
+        if (indent < scope.indent) {
+            log.debug("Closing scope...", .{});
+            _ = self.scopes.pop();
+            return true;
+        }
+
+        return false;
     }
 
     fn eatCommentsAndSpace(self: *Parser) void {
