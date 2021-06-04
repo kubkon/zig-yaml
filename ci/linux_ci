@@ -3,7 +3,7 @@
 set -x
 set -e
 
-ZIG="zig-linux-x86_64-0.8.0-dev.2667+44de88498"
+ZIG="zig-linux-x86_64-0.8.0-dev.2748+5d94e754f"
 
 wget -nv "https://ziglang.org/builds/$ZIG.tar.xz"
 tar xf "$ZIG.tar.xz"
