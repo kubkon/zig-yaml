@@ -255,6 +255,10 @@ pub fn next(self: *Tokenizer) Token {
         }
     }
 
+    if (state == .Literal and result.id == .Eof) {
+        result.id = .Literal;
+    }
+
     result.end = self.index;
 
     log.debug("{any}", .{result});
@@ -289,9 +293,13 @@ test "empty doc with explicit markers" {
 
 test "sequence of values" {
     try testExpected(
-        \\- val1
-        \\- val2
+        \\- 0
+        \\- 1
+        \\- 2
     , &[_]Token.Id{
+        .SeqItemInd,
+        .Literal,
+        .NewLine,
         .SeqItemInd,
         .Literal,
         .NewLine,
