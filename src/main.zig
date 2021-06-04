@@ -138,4 +138,8 @@ test "simple list" {
 
     const list = yaml.docs.items[0].list;
     try testing.expectEqual(list.len, 3);
+
+    try testing.expect(mem.eql(u8, list[0].string, "a"));
+    try testing.expect(mem.eql(u8, list[1].string, "b"));
+    try testing.expect(mem.eql(u8, list[2].string, "c"));
 }
