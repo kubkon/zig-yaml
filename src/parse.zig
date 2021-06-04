@@ -223,6 +223,10 @@ pub const Tree = struct {
         };
         defer parser.deinit();
 
+        try parser.scopes.append(self.allocator, .{
+            .indent = 0,
+        });
+
         while (true) {
             const curr_pos = parser.token_it.pos;
             const next = parser.token_it.peek() orelse break;
@@ -242,6 +246,11 @@ const Parser = struct {
     allocator: *Allocator,
     tree: *Tree,
     token_it: *TokenIterator,
+    scopes: std.ArrayListUnmanaged(Scope) = .{},
+
+    const Scope = struct {
+        indent: usize,
+    };
 
     const ParseError = error{
         MalformedYaml,
@@ -252,7 +261,9 @@ const Parser = struct {
         Unhandled,
     } || Allocator.Error;
 
-    fn deinit(self: *Parser) void {}
+    fn deinit(self: *Parser) void {
+        self.scopes.deinit(self.allocator);
+    }
 
     fn doc(self: *Parser, start: TokenIndex) ParseError!*Node.Doc {
         const node = try self.allocator.create(Node.Doc);
@@ -297,7 +308,7 @@ const Parser = struct {
                 },
                 .Literal => {
                     _ = try self.expectToken(.MapValueInd);
-                    const map_node = try self.map(pos, 0);
+                    const map_node = try self.map(pos);
                     node.value = &map_node.base;
                 },
                 .DocEnd => {
@@ -310,16 +321,17 @@ const Parser = struct {
                 },
                 else => {},
             }
-
-            node.end = self.token_it.pos - 1;
         }
 
+        node.end = self.token_it.pos - 1;
+
         log.debug("  | end = {}", .{node.end.?});
+        log.debug("  | Doc end = {}", .{self.tree.tokens[node.end.?]});
 
         return node;
     }
 
-    fn map(self: *Parser, start: TokenIndex, indent: usize) ParseError!*Node.Map {
+    fn map(self: *Parser, start: TokenIndex) ParseError!*Node.Map {
         const node = try self.allocator.create(Node.Map);
         errdefer self.allocator.destroy(node);
         node.* = .{
@@ -330,22 +342,10 @@ const Parser = struct {
         self.token_it.seekTo(start);
 
         log.debug("Map", .{});
+        log.debug("  | current scope = {}", .{self.scopes.items[self.scopes.items.len - 1]});
         log.debug("  | start = {}", .{start});
-        log.debug("  | indent = {}", .{indent});
 
         while (true) {
-            const scope = scope: {
-                const peek = self.token_it.peek() orelse return error.UnexpectedEof;
-                if (peek.id != .Space and peek.id != .Tab) {
-                    break :scope indent;
-                }
-                break :scope self.token_it.next().count.?;
-            };
-
-            log.debug("  | scope = {}", .{scope});
-
-            if (scope < indent) break;
-
             // Parse key.
             const key_pos = self.token_it.pos;
             const key = self.token_it.next();
@@ -372,28 +372,36 @@ const Parser = struct {
             const value: *Node = value: {
                 if (self.eatToken(.NewLine)) |_| {
                     // Explicit, complex value such as list or map.
-                    const new_scope = new_scope: {
+                    {
                         const peek = self.token_it.peek() orelse return error.UnexpectedEof;
+
                         if (peek.id != .Space and peek.id != .Tab) {
                             return error.UnexpectedToken;
                         }
-                        const new_scope = self.token_it.next().count.?;
-                        if (new_scope < indent) {
+
+                        const indent = self.token_it.next().count.?;
+                        const prev_scope = self.scopes.items[self.scopes.items.len - 1];
+
+                        if (indent < prev_scope.indent) {
                             return error.MalformedYaml;
                         }
-                        break :new_scope new_scope;
-                    };
+
+                        try self.scopes.append(self.allocator, .{
+                            .indent = indent,
+                        });
+                    }
+
                     const value_pos = self.token_it.pos;
                     const value = self.token_it.next();
                     switch (value.id) {
                         .Literal => {
                             // Assume nested map.
-                            const map_node = try self.map(value_pos, new_scope);
+                            const map_node = try self.map(value_pos);
                             break :value &map_node.base;
                         },
                         .SeqItemInd => {
                             // Assume list of values.
-                            const list_node = try self.list(value_pos, new_scope);
+                            const list_node = try self.list(value_pos);
                             break :value &list_node.base;
                         },
                         else => return error.Unhandled,
@@ -418,16 +426,38 @@ const Parser = struct {
                 .value = value,
             });
 
-            _ = self.eatToken(.NewLine);
-            node.end = self.token_it.pos - 1;
+            if (self.eatToken(.NewLine)) |_| {
+                const indent = indent: {
+                    const peek = self.token_it.peek() orelse return error.UnexpectedEof;
+                    log.debug("peek = {}", .{peek});
+                    switch (peek.id) {
+                        .Space, .Tab => {
+                            break :indent self.token_it.next().count.?;
+                        },
+                        else => {
+                            break :indent 0;
+                        },
+                    }
+                };
+
+                const scope = self.scopes.items[self.scopes.items.len - 1];
+                if (indent < scope.indent) {
+                    log.debug("closing scope...", .{});
+                    _ = self.scopes.pop();
+                    break;
+                }
+            }
         }
 
+        node.end = self.token_it.pos - 1;
+
         log.debug("  | end = {}", .{node.end.?});
+        log.debug("  | Map end = {}", .{self.tree.tokens[node.end.?]});
 
         return node;
     }
 
-    fn list(self: *Parser, start: TokenIndex, indent: usize) ParseError!*Node.List {
+    fn list(self: *Parser, start: TokenIndex) ParseError!*Node.List {
         const node = try self.allocator.create(Node.List);
         errdefer self.allocator.destroy(node);
         node.* = .{
@@ -439,22 +469,9 @@ const Parser = struct {
 
         log.debug("List", .{});
         log.debug("  | start = {}", .{start});
-        log.debug("  | indent = {}", .{indent});
 
         while (true) {
             _ = self.eatToken(.SeqItemInd) orelse break;
-
-            const scope = scope: {
-                const peek = self.token_it.peek() orelse return error.UnexpectedEof;
-                if (peek.id != .Space and peek.id != .Tab) {
-                    break :scope indent + 1;
-                }
-                break :scope indent + 1 + self.token_it.next().count.?;
-            };
-
-            log.debug("  | scope = {}", .{scope});
-
-            if (scope < indent) break;
 
             const token = self.token_it.next();
             const value: *Node = value: {
@@ -463,7 +480,7 @@ const Parser = struct {
                         const curr_pos = self.token_it.pos;
                         if (self.eatToken(.MapValueInd)) |_| {
                             // nested map
-                            const map_node = try self.map(curr_pos, scope);
+                            const map_node = try self.map(curr_pos);
                             break :value &map_node.base;
                         } else {
                             // standalone (leaf) value
@@ -539,7 +556,7 @@ const Parser = struct {
     }
 };
 
-test "simple doc with single map and directive" {
+test "explicit doc" {
     const source =
         \\--- !tapi-tbd
         \\tbd-version: 4
@@ -565,8 +582,8 @@ test "simple doc with single map and directive" {
     try testing.expectEqual(doc.value.?.tag, .map);
 
     const map = doc.value.?.cast(Node.Map).?;
-    try testing.expectEqual(map.start.?, 4);
-    try testing.expectEqual(map.end.?, 13);
+    try testing.expectEqual(map.start.?, 5);
+    try testing.expectEqual(map.end.?, 14);
     try testing.expectEqual(map.values.items.len, 2);
 
     {
@@ -598,13 +615,10 @@ test "simple doc with single map and directive" {
 
 test "nested maps" {
     const source =
-        \\---
         \\key1:
         \\  key1_1 : value1_1
         \\  key1_2 : value1_2
-        \\key2   :
-        \\  key2_1  :value2_1
-        \\...
+        \\key2   : value2
     ;
 
     var tree = Tree.init(testing.allocator);
@@ -615,15 +629,15 @@ test "nested maps" {
 
     const doc = tree.docs.items[0];
     try testing.expectEqual(doc.start.?, 0);
-    try testing.expectEqual(doc.end.?, tree.tokens.len - 2);
+    try testing.expectEqual(doc.end.?, tree.tokens.len - 1);
     try testing.expect(doc.directive == null);
 
     try testing.expect(doc.value != null);
     try testing.expectEqual(doc.value.?.tag, .map);
 
     const map = doc.value.?.cast(Node.Map).?;
-    try testing.expectEqual(map.start.?, 2);
-    try testing.expectEqual(map.end.?, 28);
+    try testing.expectEqual(map.start.?, 0);
+    try testing.expectEqual(map.end.?, tree.tokens.len - 2);
     try testing.expectEqual(map.values.items.len, 2);
 
     {
@@ -634,8 +648,8 @@ test "nested maps" {
         try testing.expect(mem.eql(u8, "key1", tree.source[key.start..key.end]));
 
         const nested_map = entry.value.cast(Node.Map).?;
-        try testing.expectEqual(nested_map.start.?, 6);
-        try testing.expectEqual(nested_map.end.?, 11);
+        try testing.expectEqual(nested_map.start.?, 4);
+        try testing.expectEqual(nested_map.end.?, 16);
         try testing.expectEqual(nested_map.values.items.len, 2);
 
         {
@@ -693,7 +707,7 @@ test "nested maps" {
         try testing.expectEqual(value_tok.id, .Literal);
         try testing.expect(mem.eql(
             u8,
-            "value2_1",
+            "value2",
             tree.source[value_tok.start..value_tok.end],
         ));
     }
