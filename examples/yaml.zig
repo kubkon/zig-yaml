@@ -35,10 +35,10 @@ pub fn main() !void {
 
         const source = try file.readToEndAlloc(allocator, std.math.maxInt(u32));
 
-        var tree = yaml.parse.Tree.init(allocator);
-        try tree.parse(source);
+        var parsed = yaml.Yaml.init(allocator);
+        try parsed.load(source);
 
-        const formatted = try std.fmt.allocPrint(allocator, "{}\n", .{tree.docs.items[0]});
+        const formatted = try std.fmt.allocPrint(allocator, "{}\n", .{parsed.docs});
         try io.getStdOut().writeAll(formatted);
     }
 }

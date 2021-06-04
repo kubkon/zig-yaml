@@ -182,7 +182,7 @@ pub const Tree = struct {
     allocator: *Allocator,
     source: []const u8,
     tokens: []Token,
-    docs: std.ArrayListUnmanaged(*Node.Doc) = .{},
+    docs: std.ArrayListUnmanaged(*Node) = .{},
 
     pub fn init(allocator: *Allocator) Tree {
         return .{
@@ -236,7 +236,7 @@ pub const Tree = struct {
             }
 
             const doc = try parser.doc(curr_pos);
-            try self.docs.append(self.allocator, doc);
+            try self.docs.append(self.allocator, &doc.base);
         }
     }
 };
@@ -581,7 +581,7 @@ test "explicit doc" {
 
     try testing.expectEqual(tree.docs.items.len, 1);
 
-    const doc = tree.docs.items[0];
+    const doc = tree.docs.items[0].cast(Node.Doc).?;
     try testing.expectEqual(doc.start.?, 0);
     try testing.expectEqual(doc.end.?, tree.tokens.len - 2);
 
@@ -638,7 +638,7 @@ test "nested maps" {
 
     try testing.expectEqual(tree.docs.items.len, 1);
 
-    const doc = tree.docs.items[0];
+    const doc = tree.docs.items[0].cast(Node.Doc).?;
     try testing.expectEqual(doc.start.?, 0);
     try testing.expectEqual(doc.end.?, tree.tokens.len - 1);
     try testing.expect(doc.directive == null);
@@ -737,7 +737,7 @@ test "map of list of values" {
 
     try testing.expectEqual(tree.docs.items.len, 1);
 
-    const doc = tree.docs.items[0];
+    const doc = tree.docs.items[0].cast(Node.Doc).?;
     try testing.expectEqual(doc.start.?, 0);
     try testing.expectEqual(doc.end.?, tree.tokens.len - 1);
 
@@ -795,7 +795,7 @@ test "map of list of maps" {
 
     try testing.expectEqual(tree.docs.items.len, 1);
 
-    const doc = tree.docs.items[0];
+    const doc = tree.docs.items[0].cast(Node.Doc).?;
     try testing.expectEqual(doc.start.?, 0);
     try testing.expectEqual(doc.end.?, tree.tokens.len - 1);
 
