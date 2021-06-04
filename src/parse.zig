@@ -224,13 +224,15 @@ pub const Tree = struct {
         defer parser.deinit();
 
         while (true) {
+            const curr_pos = parser.token_it.pos;
             const next = parser.token_it.peek() orelse break;
             if (next.id == .Eof) {
+                log.debug("found Eof; stopping...", .{});
                 _ = parser.token_it.next();
                 break;
             }
 
-            const doc = try parser.doc(parser.token_it.getPos());
+            const doc = try parser.doc(curr_pos);
             try self.docs.append(self.allocator, doc);
         }
     }
@@ -260,17 +262,31 @@ const Parser = struct {
         };
         node.base.tree = self.tree;
 
-        if (self.eatToken(.DocStart)) |_| {
+        self.token_it.seekTo(start);
+
+        log.debug("Doc", .{});
+        log.debug("  | start = {}", .{start});
+
+        const explicit_doc: bool = if (self.eatToken(.DocStart)) |_| explicit_doc: {
+            log.debug("  | found explicit {s}: ---", .{.DocStart});
+
             if (self.eatToken(.Tag)) |_| {
                 node.directive = try self.expectToken(.Literal);
+                log.debug("  | found directive", .{});
             }
-        }
 
-        _ = try self.expectToken(.NewLine);
+            _ = try self.expectToken(.NewLine);
+
+            break :explicit_doc true;
+        } else false;
 
         while (true) {
-            const curr_pos = self.token_it.getPos();
+            const pos = self.token_it.pos;
             const token = self.token_it.next();
+
+            log.debug("  | pos = {}", .{pos});
+            log.debug("  | token = {}", .{token});
+
             switch (token.id) {
                 .DocStart => {
                     // TODO this should be an error token
@@ -281,19 +297,24 @@ const Parser = struct {
                 },
                 .Literal => {
                     _ = try self.expectToken(.MapValueInd);
-                    const map_node = try self.map(curr_pos, 0);
+                    const map_node = try self.map(pos, 0);
                     node.value = &map_node.base;
                 },
                 .DocEnd => {
-                    node.end = self.token_it.getPos();
-                    break;
+                    if (explicit_doc) break;
+                    return error.UnexpectedToken;
                 },
                 .Eof => {
+                    if (!explicit_doc) break;
                     return error.UnexpectedEof;
                 },
                 else => {},
             }
+
+            node.end = self.token_it.pos - 1;
         }
+
+        log.debug("  | end = {}", .{node.end.?});
 
         return node;
     }
@@ -306,7 +327,11 @@ const Parser = struct {
         };
         node.base.tree = self.tree;
 
-        self.token_it.resetTo(start);
+        self.token_it.seekTo(start);
+
+        log.debug("Map", .{});
+        log.debug("  | start = {}", .{start});
+        log.debug("  | indent = {}", .{indent});
 
         while (true) {
             const scope = scope: {
@@ -314,78 +339,90 @@ const Parser = struct {
                 if (peek.id != .Space and peek.id != .Tab) {
                     break :scope indent;
                 }
-                break :scope indent + self.token_it.next().count.?;
+                break :scope self.token_it.next().count.?;
             };
+
+            log.debug("  | scope = {}", .{scope});
 
             if (scope < indent) break;
 
             // Parse key.
+            const key_pos = self.token_it.pos;
             const key = self.token_it.next();
-            const key_index = self.token_it.getPos();
             switch (key.id) {
                 .Literal => {},
-                .DocEnd => {
-                    self.token_it.resetTo(key_index - 1);
+                .NewLine, .DocEnd, .Eof => {
+                    self.token_it.seekBy(-1);
                     break;
                 },
                 else => {
                     // TODO bubble up error.
+                    log.err("{}", .{key});
                     return error.UnexpectedToken;
                 },
             }
 
+            log.debug("  | key: {{ {}, '{s}' }}", .{ key, self.tree.source[key.start..key.end] });
+
             // Separator
             _ = try self.expectToken(.MapValueInd);
+            self.eatCommentsAndSpace();
 
             // Parse value.
             const value: *Node = value: {
                 if (self.eatToken(.NewLine)) |_| {
                     // Explicit, complex value such as list or map.
-                    const new_indent = new_indent: {
+                    const new_scope = new_scope: {
                         const peek = self.token_it.peek() orelse return error.UnexpectedEof;
                         if (peek.id != .Space and peek.id != .Tab) {
                             return error.UnexpectedToken;
                         }
-                        const new_indent = self.token_it.next().count.?;
-                        if (new_indent < indent) {
+                        const new_scope = self.token_it.next().count.?;
+                        if (new_scope < indent) {
                             return error.MalformedYaml;
                         }
-                        break :new_indent new_indent;
+                        break :new_scope new_scope;
                     };
+                    const value_pos = self.token_it.pos;
                     const value = self.token_it.next();
                     switch (value.id) {
                         .Literal => {
                             // Assume nested map.
-                            const map_node = try self.map(self.token_it.getPos(), new_indent);
+                            const map_node = try self.map(value_pos, new_scope);
                             break :value &map_node.base;
                         },
                         .SeqItemInd => {
                             // Assume list of values.
-                            const list_node = try self.list(self.token_it.getPos(), new_indent);
+                            const list_node = try self.list(value_pos, new_scope);
                             break :value &list_node.base;
                         },
                         else => return error.Unhandled,
                     }
                 } else {
+                    const value_pos = self.token_it.pos;
                     const value = self.token_it.next();
                     switch (value.id) {
                         .Literal => {
                             // Assume leaf value.
-                            const leaf_node = try self.leaf_value();
+                            const leaf_node = try self.leaf_value(value_pos);
                             break :value &leaf_node.base;
                         },
                         else => return error.Unhandled,
                     }
                 }
             };
+            log.debug("  | value: {}", .{value});
+
             try node.values.append(self.allocator, .{
-                .key = key_index,
+                .key = key_pos,
                 .value = value,
             });
 
-            _ = try self.expectToken(.NewLine);
-            node.end = self.token_it.getPos() - 1;
+            _ = self.eatToken(.NewLine);
+            node.end = self.token_it.pos - 1;
         }
+
+        log.debug("  | end = {}", .{node.end.?});
 
         return node;
     }
@@ -398,33 +435,39 @@ const Parser = struct {
         };
         node.base.tree = self.tree;
 
-        self.token_it.resetTo(start);
+        self.token_it.seekTo(start);
+
+        log.debug("List", .{});
+        log.debug("  | start = {}", .{start});
+        log.debug("  | indent = {}", .{indent});
 
         while (true) {
             _ = self.eatToken(.SeqItemInd) orelse break;
 
-            const new_indent = new_indent: {
+            const scope = scope: {
                 const peek = self.token_it.peek() orelse return error.UnexpectedEof;
                 if (peek.id != .Space and peek.id != .Tab) {
-                    break :new_indent indent + 1;
+                    break :scope indent + 1;
                 }
-                break :new_indent indent + 1 + self.token_it.next().count.?;
+                break :scope indent + 1 + self.token_it.next().count.?;
             };
 
-            if (new_indent < indent) break;
+            log.debug("  | scope = {}", .{scope});
+
+            if (scope < indent) break;
 
             const token = self.token_it.next();
             const value: *Node = value: {
                 switch (token.id) {
                     .Literal => {
-                        const curr_pos = self.token_it.getPos();
+                        const curr_pos = self.token_it.pos;
                         if (self.eatToken(.MapValueInd)) |_| {
                             // nested map
-                            const map_node = try self.map(curr_pos, new_indent);
+                            const map_node = try self.map(curr_pos, scope);
                             break :value &map_node.base;
                         } else {
                             // standalone (leaf) value
-                            const leaf_node = try self.leaf_value();
+                            const leaf_node = try self.leaf_value(curr_pos);
                             break :value &leaf_node.base;
                         }
                     },
@@ -434,31 +477,39 @@ const Parser = struct {
             try node.values.append(self.allocator, value);
 
             _ = try self.expectToken(.NewLine);
-            node.end = self.token_it.getPos() - 1;
+            node.end = self.token_it.pos - 1;
         }
+
+        log.debug("  | end = {}", .{node.end.?});
 
         return node;
     }
 
-    fn leaf_value(self: *Parser) ParseError!*Node.Value {
+    fn leaf_value(self: *Parser, start: TokenIndex) ParseError!*Node.Value {
         const node = try self.allocator.create(Node.Value);
         errdefer self.allocator.destroy(node);
         node.* = .{
-            .value = self.token_it.getPos(),
+            .value = start,
         };
         node.base.tree = self.tree;
+
+        self.token_it.seekTo(start);
+        const token = self.token_it.next();
+
+        log.debug("Leaf", .{});
+        log.debug("  | {{ {}, '{s}' }}", .{ token, self.tree.source[token.start..token.end] });
+
         return node;
     }
 
     fn eatCommentsAndSpace(self: *Parser) void {
         while (true) {
-            const cur_pos = self.token_it.getPos();
             _ = self.token_it.peek() orelse return;
             const token = self.token_it.next();
             switch (token.id) {
                 .Comment, .Space => {},
                 else => {
-                    self.token_it.resetTo(cur_pos);
+                    self.token_it.seekBy(-1);
                     break;
                 },
             }
@@ -467,15 +518,16 @@ const Parser = struct {
 
     fn eatToken(self: *Parser, id: Token.Id) ?TokenIndex {
         while (true) {
-            const cur_pos = self.token_it.getPos();
+            const pos = self.token_it.pos;
             _ = self.token_it.peek() orelse return null;
             const token = self.token_it.next();
+            log.debug("{}", .{token});
             switch (token.id) {
                 .Comment, .Space => continue,
                 else => |next_id| if (next_id == id) {
-                    return self.token_it.getPos();
+                    return pos;
                 } else {
-                    self.token_it.resetTo(cur_pos);
+                    self.token_it.seekTo(pos);
                     return null;
                 },
             }
@@ -544,72 +596,108 @@ test "simple doc with single map and directive" {
     }
 }
 
-// test "nested maps" {
-//     const source =
-//         \\---
-//         \\key1:
-//         \\  key1_1 : value1_1
-//         \\key2   :
-//         \\  key2_1  :value2_1
-//         \\...
-//     ;
+test "nested maps" {
+    const source =
+        \\---
+        \\key1:
+        \\  key1_1 : value1_1
+        \\  key1_2 : value1_2
+        \\key2   :
+        \\  key2_1  :value2_1
+        \\...
+    ;
 
-//     var tree = Tree.init(testing.allocator);
-//     defer tree.deinit();
-//     try tree.parse(source);
+    var tree = Tree.init(testing.allocator);
+    defer tree.deinit();
+    try tree.parse(source);
 
-//     try testing.expectEqual(tree.docs.items.len, 1);
+    try testing.expectEqual(tree.docs.items.len, 1);
 
-//     const doc = tree.docs.items[0];
-//     try testing.expectEqual(doc.start.?, 0);
-//     try testing.expectEqual(doc.end.?, tree.tokens.len - 2);
-//     try testing.expect(doc.directive == null);
-//     try testing.expectEqual(doc.values.items.len, 2);
+    const doc = tree.docs.items[0];
+    try testing.expectEqual(doc.start.?, 0);
+    try testing.expectEqual(doc.end.?, tree.tokens.len - 2);
+    try testing.expect(doc.directive == null);
 
-//     {
-//         // first value: map: key1 => { key1_1 => value1 }
-//         const map = doc.values.items[0].cast(Node.Map).?;
-//         const key1 = tree.tokens[map.key.?];
-//         try testing.expectEqual(key1.id, .Literal);
-//         try testing.expect(mem.eql(u8, "key1", tree.source[key1.start..key1.end]));
+    try testing.expect(doc.value != null);
+    try testing.expectEqual(doc.value.?.tag, .map);
 
-//         const value1 = map.value.?.cast(Node.Map).?;
-//         const key1_1 = tree.tokens[value1.key.?];
-//         try testing.expectEqual(key1_1.id, .Literal);
-//         try testing.expect(mem.eql(u8, "key1_1", tree.source[key1_1.start..key1_1.end]));
+    const map = doc.value.?.cast(Node.Map).?;
+    try testing.expectEqual(map.start.?, 2);
+    try testing.expectEqual(map.end.?, 28);
+    try testing.expectEqual(map.values.items.len, 2);
 
-//         const value1_1 = value1.value.?.cast(Node.Value).?;
-//         const value1_1_tok = tree.tokens[value1_1.value.?];
-//         try testing.expectEqual(value1_1_tok.id, .Literal);
-//         try testing.expect(mem.eql(
-//             u8,
-//             "value1_1",
-//             tree.source[value1_1_tok.start..value1_1_tok.end],
-//         ));
-//     }
+    {
+        const entry = map.values.items[0];
 
-//     {
-//         // second value: map: key2 => { key2_1 => value2 }
-//         const map = doc.values.items[1].cast(Node.Map).?;
-//         const key2 = tree.tokens[map.key.?];
-//         try testing.expectEqual(key2.id, .Literal);
-//         try testing.expect(mem.eql(u8, "key2", tree.source[key2.start..key2.end]));
+        const key = tree.tokens[entry.key];
+        try testing.expectEqual(key.id, .Literal);
+        try testing.expect(mem.eql(u8, "key1", tree.source[key.start..key.end]));
 
-//         const value2 = map.value.?.cast(Node.Map).?;
-//         const key2_1 = tree.tokens[value2.key.?];
-//         try testing.expectEqual(key2_1.id, .Literal);
-//         try testing.expect(mem.eql(u8, "key2_1", tree.source[key2_1.start..key2_1.end]));
+        const nested_map = entry.value.cast(Node.Map).?;
+        try testing.expectEqual(nested_map.start.?, 6);
+        try testing.expectEqual(nested_map.end.?, 11);
+        try testing.expectEqual(nested_map.values.items.len, 2);
 
-//         const value2_1 = value2.value.?.cast(Node.Value).?;
-//         const value2_1_tok = tree.tokens[value2_1.value.?];
-//         try testing.expectEqual(value2_1_tok.id, .Literal);
-//         try testing.expect(mem.eql(
-//             u8,
-//             "value2_1",
-//             tree.source[value2_1_tok.start..value2_1_tok.end],
-//         ));
-//     }
-// }
+        {
+            const nested_entry = nested_map.values.items[0];
+
+            const nested_key = tree.tokens[nested_entry.key];
+            try testing.expectEqual(nested_key.id, .Literal);
+            try testing.expect(mem.eql(
+                u8,
+                "key1_1",
+                tree.source[nested_key.start..nested_key.end],
+            ));
+
+            const nested_value = nested_entry.value.cast(Node.Value).?;
+            const nested_value_tok = tree.tokens[nested_value.value.?];
+            try testing.expectEqual(nested_value_tok.id, .Literal);
+            try testing.expect(mem.eql(
+                u8,
+                "value1_1",
+                tree.source[nested_value_tok.start..nested_value_tok.end],
+            ));
+        }
+
+        {
+            const nested_entry = nested_map.values.items[1];
+
+            const nested_key = tree.tokens[nested_entry.key];
+            try testing.expectEqual(nested_key.id, .Literal);
+            try testing.expect(mem.eql(
+                u8,
+                "key1_2",
+                tree.source[nested_key.start..nested_key.end],
+            ));
+
+            const nested_value = nested_entry.value.cast(Node.Value).?;
+            const nested_value_tok = tree.tokens[nested_value.value.?];
+            try testing.expectEqual(nested_value_tok.id, .Literal);
+            try testing.expect(mem.eql(
+                u8,
+                "value1_2",
+                tree.source[nested_value_tok.start..nested_value_tok.end],
+            ));
+        }
+    }
+
+    {
+        const entry = map.values.items[1];
+
+        const key = tree.tokens[entry.key];
+        try testing.expectEqual(key.id, .Literal);
+        try testing.expect(mem.eql(u8, "key2", tree.source[key.start..key.end]));
+
+        const value = entry.value.cast(Node.Value).?;
+        const value_tok = tree.tokens[value.value.?];
+        try testing.expectEqual(value_tok.id, .Literal);
+        try testing.expect(mem.eql(
+            u8,
+            "value2_1",
+            tree.source[value_tok.start..value_tok.end],
+        ));
+    }
+}
 
 // test "map of list of values" {
 //     const source =

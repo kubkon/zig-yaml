@@ -59,18 +59,21 @@ pub const TokenIterator = struct {
         return self.buffer[self.pos];
     }
 
-    pub fn resetTo(self: *TokenIterator, pos: TokenIndex) void {
-        self.pos = pos + 1;
+    pub fn reset(self: *TokenIterator) void {
+        self.pos = 0;
     }
 
-    pub fn advanceBy(self: *TokenIterator, offset: TokenIndex) void {
-        if (offset == 0) return;
-        self.pos += offset - 1;
+    pub fn seekTo(self: *TokenIterator, pos: TokenIndex) void {
+        self.pos = pos;
     }
 
-    pub fn getPos(self: TokenIterator) TokenIndex {
-        if (self.pos == 0) return 0;
-        return self.pos - 1;
+    pub fn seekBy(self: *TokenIterator, offset: isize) void {
+        const new_pos = @bitCast(isize, self.pos) + offset;
+        if (new_pos < 0) {
+            self.pos = 0;
+        } else {
+            self.pos = @intCast(usize, new_pos);
+        }
     }
 };
 
