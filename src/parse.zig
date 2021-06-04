@@ -10,6 +10,15 @@ const Token = Tokenizer.Token;
 const TokenIndex = Tokenizer.TokenIndex;
 const TokenIterator = Tokenizer.TokenIterator;
 
+pub const ParseError = error{
+    MalformedYaml,
+    NestedDocuments,
+    UnexpectedTag,
+    UnexpectedEof,
+    UnexpectedToken,
+    Unhandled,
+} || Allocator.Error;
+
 pub const Node = struct {
     tag: Tag,
     tree: *const Tree,
@@ -250,15 +259,6 @@ const Parser = struct {
     const Scope = struct {
         indent: usize,
     };
-
-    const ParseError = error{
-        MalformedYaml,
-        NestedDocuments,
-        UnexpectedTag,
-        UnexpectedEof,
-        UnexpectedToken,
-        Unhandled,
-    } || Allocator.Error;
 
     fn deinit(self: *Parser) void {
         self.scopes.deinit(self.allocator);

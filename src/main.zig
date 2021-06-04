@@ -11,6 +11,9 @@ pub const parse = @import("parse.zig");
 
 const Node = parse.Node;
 const Tree = parse.Tree;
+const ParseError = parse.ParseError;
+
+pub const YamlError = error{UnexpectedNodeType} || ParseError;
 
 pub const Value = union(enum) {
     empty,
@@ -27,8 +30,8 @@ pub const Value = union(enum) {
                 allocator.free(arr);
             },
             .map => |*m| {
-                for (m.items()) |*value| {
-                    value.value.deinit(allocator);
+                for (m.values()) |*value| {
+                    value.deinit(allocator);
                 }
                 m.deinit(allocator);
             },
@@ -36,11 +39,11 @@ pub const Value = union(enum) {
         }
     }
 
-    fn fromNode(allocator: *Allocator, tree: *const Tree, node: *const Node) anyerror!Value {
+    fn fromNode(allocator: *Allocator, tree: *const Tree, node: *const Node) YamlError!Value {
         if (node.cast(Node.Doc)) |doc| {
             const inner = doc.value orelse {
                 // empty doc
-                return error.TODOEmptyDoc;
+                return Value{ .empty = .{} };
             };
             return Value.fromNode(allocator, tree, inner);
         } else if (node.cast(Node.Map)) |map| {
@@ -104,8 +107,6 @@ pub const Yaml = struct {
 
     pub fn load(self: *Yaml, source: []const u8) !void {
         var tree = Tree.init(self.allocator);
-        self.tree = tree;
-
         try tree.parse(source);
 
         try self.docs.ensureUnusedCapacity(self.allocator, tree.docs.items.len);
@@ -113,6 +114,8 @@ pub const Yaml = struct {
             const value = try Value.fromNode(self.allocator, &tree, node);
             self.docs.appendAssumeCapacity(value);
         }
+
+        self.tree = tree;
     }
 };
 
