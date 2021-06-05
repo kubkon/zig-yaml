@@ -117,6 +117,27 @@ pub const Yaml = struct {
 
         self.tree = tree;
     }
+
+    pub fn parse(self: *Yaml, comptime T: type, source: []const u8) !T {
+        try self.load(source);
+        switch (@typeInfo(T)) {
+            .Struct => |struct_info| {
+                const map = self.docs.items[0].map;
+                var parsed: T = undefined;
+                inline for (struct_info.fields) |field| {
+                    const value = map.get(field.name) orelse return error.SerializationMismatch;
+                    switch (@typeInfo(field.field_type)) {
+                        .Int => {
+                            @field(parsed, field.name) = try std.fmt.parseInt(field.field_type, value.string, 10);
+                        },
+                        else => @compileError("unimplemented"),
+                    }
+                }
+                return parsed;
+            },
+            else => @compileError("unimplemented"),
+        }
+    }
 };
 
 test "" {
@@ -142,4 +163,36 @@ test "simple list" {
     try testing.expect(mem.eql(u8, list[0].string, "a"));
     try testing.expect(mem.eql(u8, list[1].string, "b"));
     try testing.expect(mem.eql(u8, list[2].string, "c"));
+}
+
+test "simple map untyped" {
+    const source =
+        \\a: 0
+    ;
+
+    var yaml = Yaml.init(testing.allocator);
+    defer yaml.deinit();
+    try yaml.load(source);
+
+    try testing.expectEqual(yaml.docs.items.len, 1);
+
+    const map = yaml.docs.items[0].map;
+    try testing.expect(map.contains("a"));
+    try testing.expect(mem.eql(u8, map.get("a").?.string, "0"));
+}
+
+test "simple map typed" {
+    const source =
+        \\a: 0
+    ;
+
+    const Simple = struct {
+        a: usize,
+    };
+
+    var yaml = Yaml.init(testing.allocator);
+    defer yaml.deinit();
+
+    const simple = try yaml.parse(Simple, source);
+    try testing.expectEqual(simple.a, 0);
 }

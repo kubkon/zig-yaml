@@ -23,30 +23,49 @@ parser. This reminds me to add a TODO to convert `examples/` into end-to-end tes
 
 If you want to use the parser as a library, add it as a package the usual way, and then:
 
+1. For untyped, raw representation of YAML, use `Yaml.load`:
+
 ```zig
 const std = @import("std");
 const yaml = @import("yaml");
 
 const source =
-  \\ints:
-  \\- 0
-  \\- 1
-  \\- 2
-  ;
+    \\a: 0
+;
 
 pub fn main() !void {
-  var decoder = yaml.Yaml.init(std.testing.allocator);
-  defer decoder.deinit();
+    var decoder = yaml.Yaml.init(std.testing.allocator);
+    defer decoder.deinit();
 
-  try decoder.load(source);
-  
-  try std.testing.expectEqual(decoder.docs.items.len, 1);
+    try decoder.load(source);
+    
+    try std.testing.expectEqual(decoder.docs.items.len, 1);
 
-  const list = decoder.docs.items[0].list;
-  try std.testing.expectEqual(list.len, 3);
+    const map = decoder.docs.items[0].map;
+    try std.testing.expect(map.contains("a"));
+    try std.testing.expect(std.mem.eql(u8, map.get("a").?.string, "0"));
+}
+```
 
-  try std.testing.expect(std.mem.eql(u8, "0", list[0].string));
-  try std.testing.expect(std.mem.eql(u8, "1", list[1].string));
-  try std.testing.expect(std.mem.eql(u8, "2", list[2].string));
+2. For typed representation of YAML, use `Yaml.parse`:
+
+```zig
+const std = @import("std");
+const yaml = @import("yaml");
+
+const source =
+    \\a: 0
+;
+
+const Simple = struct {
+    a: usize,
+};
+
+pub fn main() !void {
+    var decoder = yaml.Yaml.init(std.testing.allocator);
+    defer decoder.deinit();
+
+    const simple = try yaml.parse(Simple, source);
+    try std.testing.expectEqual(simple.a, 0);
 }
 ```
