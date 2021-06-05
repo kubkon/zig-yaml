@@ -3,9 +3,10 @@
 set -x
 set -e
 
-ZIG="zig-macos-x86_64-0.8.0-dev.2748+5d94e754f"
+VERSION="0.8.0"
+ZIG="zig-macos-x86_64-$VERSION"
 
-curl -L "https://ziglang.org/builds/$ZIG.tar.xz" -o "$ZIG.tar.xz"
+curl -L "https://ziglang.org/download/$VERSION/$ZIG.tar.xz" -o "$ZIG.tar.xz"
 tar xf "$ZIG.tar.xz"
 export PATH="$(pwd)/$ZIG:$PATH"
 

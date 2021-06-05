@@ -3,9 +3,10 @@
 set -x
 set -e
 
-ZIG="zig-windows-x86_64-0.8.0-dev.2748+5d94e754f"
+VERSION="0.8.0"
+ZIG="zig-windows-x86_64-$VERSION"
 
-curl -L "https://ziglang.org/builds/$ZIG.zip" -o "$ZIG.zip"
+curl -L "https://ziglang.org/download/$VERSION/$ZIG.zip" -o "$ZIG.zip"
 7z x "$ZIG.zip"
 export PATH="$(pwd)/$ZIG:$PATH"
 
