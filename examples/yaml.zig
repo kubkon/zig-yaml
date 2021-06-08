@@ -35,8 +35,7 @@ pub fn main() !void {
 
         const source = try file.readToEndAlloc(allocator, std.math.maxInt(u32));
 
-        var parsed = yaml.Yaml.init(allocator);
-        try parsed.load(source);
+        var parsed = try yaml.Yaml.load(allocator, source);
 
         const formatted = try std.fmt.allocPrint(allocator, "{}\n", .{parsed.docs});
         try io.getStdOut().writeAll(formatted);

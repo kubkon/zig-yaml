@@ -89,12 +89,6 @@ pub const Yaml = struct {
     tree: ?Tree = null,
     docs: std.ArrayListUnmanaged(Value) = .{},
 
-    pub fn init(allocator: *Allocator) Yaml {
-        return .{
-            .allocator = allocator,
-        };
-    }
-
     pub fn deinit(self: *Yaml) void {
         if (self.tree) |*tree| {
             tree.deinit();
@@ -105,21 +99,29 @@ pub const Yaml = struct {
         self.docs.deinit(self.allocator);
     }
 
-    pub fn load(self: *Yaml, source: []const u8) !void {
-        var tree = Tree.init(self.allocator);
+    pub fn load(allocator: *Allocator, source: []const u8) !Yaml {
+        var tree = Tree.init(allocator);
+        errdefer tree.deinit();
+
         try tree.parse(source);
 
-        try self.docs.ensureUnusedCapacity(self.allocator, tree.docs.items.len);
+        var docs: std.ArrayListUnmanaged(Value) = .{};
+        errdefer docs.deinit(allocator);
+
+        try docs.ensureUnusedCapacity(allocator, tree.docs.items.len);
         for (tree.docs.items) |node| {
-            const value = try Value.fromNode(self.allocator, &tree, node);
-            self.docs.appendAssumeCapacity(value);
+            const value = try Value.fromNode(allocator, &tree, node);
+            docs.appendAssumeCapacity(value);
         }
 
-        self.tree = tree;
+        return Yaml{
+            .allocator = allocator,
+            .tree = tree,
+            .docs = docs,
+        };
     }
 
-    pub fn parse(self: *Yaml, comptime T: type, source: []const u8) !T {
-        try self.load(source);
+    pub fn parse(self: *Yaml, comptime T: type) !T {
         switch (@typeInfo(T)) {
             .Struct => |struct_info| {
                 const map = self.docs.items[0].map;
@@ -151,9 +153,8 @@ test "simple list" {
         \\- c
     ;
 
-    var yaml = Yaml.init(testing.allocator);
+    var yaml = try Yaml.load(testing.allocator, source);
     defer yaml.deinit();
-    try yaml.load(source);
 
     try testing.expectEqual(yaml.docs.items.len, 1);
 
@@ -170,9 +171,8 @@ test "simple map untyped" {
         \\a: 0
     ;
 
-    var yaml = Yaml.init(testing.allocator);
+    var yaml = try Yaml.load(testing.allocator, source);
     defer yaml.deinit();
-    try yaml.load(source);
 
     try testing.expectEqual(yaml.docs.items.len, 1);
 
@@ -190,9 +190,9 @@ test "simple map typed" {
         a: usize,
     };
 
-    var yaml = Yaml.init(testing.allocator);
+    var yaml = try Yaml.load(testing.allocator, source);
     defer yaml.deinit();
 
-    const simple = try yaml.parse(Simple, source);
+    const simple = try yaml.parse(Simple);
     try testing.expectEqual(simple.a, 0);
 }

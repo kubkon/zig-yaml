@@ -34,14 +34,12 @@ const source =
 ;
 
 pub fn main() !void {
-    var decoder = yaml.Yaml.init(std.testing.allocator);
-    defer decoder.deinit();
-
-    try decoder.load(source);
+    var untyped = try yaml.Yaml.load(std.testing.allocator, source);
+    defer untyped.deinit();
     
-    try std.testing.expectEqual(decoder.docs.items.len, 1);
+    try std.testing.expectEqual(untyped.docs.items.len, 1);
 
-    const map = decoder.docs.items[0].map;
+    const map = untyped.docs.items[0].map;
     try std.testing.expect(map.contains("a"));
     try std.testing.expect(std.mem.eql(u8, map.get("a").?.string, "0"));
 }
@@ -62,10 +60,10 @@ const Simple = struct {
 };
 
 pub fn main() !void {
-    var decoder = yaml.Yaml.init(std.testing.allocator);
-    defer decoder.deinit();
+    var untyped = try yaml.Yaml.load(std.testing.allocator, source);
+    defer untyped.deinit();
 
-    const simple = try yaml.parse(Simple, source);
+    const simple = try untyped.parse(Simple);
     try std.testing.expectEqual(simple.a, 0);
 }
 ```
