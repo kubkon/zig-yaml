@@ -237,15 +237,20 @@ pub const Tree = struct {
         });
 
         while (true) {
-            const curr_pos = parser.token_it.pos;
-            const next = parser.token_it.peek() orelse break;
-            if (next.id == .Eof) {
-                _ = parser.token_it.next();
-                break;
-            }
+            if (parser.token_it.peek() == null) return;
+            const pos = parser.token_it.pos;
+            const token = parser.token_it.next();
 
-            const doc = try parser.doc(curr_pos);
-            try self.docs.append(self.allocator, &doc.base);
+            log.debug("Next token: {}, {}", .{ pos, token });
+
+            switch (token.id) {
+                .Space, .Comment, .NewLine => {},
+                .Eof => break,
+                else => {
+                    const doc = try parser.doc(pos);
+                    try self.docs.append(self.allocator, &doc.base);
+                },
+            }
         }
     }
 };

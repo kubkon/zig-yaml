@@ -121,7 +121,17 @@ pub const Yaml = struct {
         };
     }
 
-    pub fn parse(self: *Yaml, comptime T: type) !T {
+    pub const Error = error{
+        EmptyYaml,
+        MultiDocUnsupported,
+        StructFieldMissing,
+        ArraySizeMismatch,
+    } || std.fmt.ParseIntError;
+
+    pub fn parse(self: *Yaml, comptime T: type) Error!T {
+        if (self.docs.items.len == 0) return error.EmptyYaml;
+        if (self.docs.items.len > 1) return error.MultiDocUnsupported;
+
         switch (@typeInfo(T)) {
             .Struct => |struct_info| {
                 const map = self.docs.items[0].map;
@@ -157,6 +167,7 @@ pub const Yaml = struct {
 
                 return parsed;
             },
+            .Void => unreachable,
             else => @compileError("unimplemented"),
         }
     }
@@ -225,13 +236,58 @@ test "simple map typed" {
         \\a: 0
     ;
 
-    const Simple = struct {
-        a: usize,
-    };
+    var yaml = try Yaml.load(testing.allocator, source);
+    defer yaml.deinit();
+
+    const simple = try yaml.parse(struct { a: usize });
+    try testing.expectEqual(simple.a, 0);
+}
+
+test "multidoc typed not supported yet" {
+    const source =
+        \\---
+        \\a: 0
+        \\...
+        \\---
+        \\- 0
+        \\...
+    ;
 
     var yaml = try Yaml.load(testing.allocator, source);
     defer yaml.deinit();
 
-    const simple = try yaml.parse(Simple);
-    try testing.expectEqual(simple.a, 0);
+    try testing.expectError(Yaml.Error.MultiDocUnsupported, yaml.parse(struct { a: usize }));
+    try testing.expectError(Yaml.Error.MultiDocUnsupported, yaml.parse([1]usize));
+}
+
+test "empty yaml typed not supported" {
+    const source = "";
+    var yaml = try Yaml.load(testing.allocator, source);
+    defer yaml.deinit();
+    try testing.expectError(Yaml.Error.EmptyYaml, yaml.parse(void));
+}
+
+test "typed array size mismatch" {
+    const source =
+        \\- 0
+        \\- 0
+    ;
+
+    var yaml = try Yaml.load(testing.allocator, source);
+    defer yaml.deinit();
+
+    try testing.expectError(Yaml.Error.ArraySizeMismatch, yaml.parse([1]usize));
+    try testing.expectError(Yaml.Error.ArraySizeMismatch, yaml.parse([5]usize));
+}
+
+test "typed struct missing field" {
+    const source =
+        \\bar: 10
+    ;
+
+    var yaml = try Yaml.load(testing.allocator, source);
+    defer yaml.deinit();
+
+    try testing.expectError(Yaml.Error.StructFieldMissing, yaml.parse(struct { foo: usize }));
+    try testing.expectError(Yaml.Error.StructFieldMissing, yaml.parse(struct { foobar: usize }));
 }
