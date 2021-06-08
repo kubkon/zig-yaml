@@ -126,8 +126,10 @@ pub const Yaml = struct {
             .Struct => |struct_info| {
                 const map = self.docs.items[0].map;
                 var parsed: T = undefined;
+
                 inline for (struct_info.fields) |field| {
-                    const value = map.get(field.name) orelse return error.SerializationMismatch;
+                    const value = map.get(field.name) orelse return error.StructFieldMissing;
+
                     switch (@typeInfo(field.field_type)) {
                         .Int => {
                             @field(parsed, field.name) = try std.fmt.parseInt(field.field_type, value.string, 10);
@@ -135,6 +137,24 @@ pub const Yaml = struct {
                         else => @compileError("unimplemented"),
                     }
                 }
+
+                return parsed;
+            },
+            .Array => |array_info| {
+                const list = self.docs.items[0].list;
+
+                if (array_info.len != list.len) return error.ArraySizeMismatch;
+
+                var parsed: T = undefined;
+                switch (@typeInfo(array_info.child)) {
+                    .Int => {
+                        for (list) |value, i| {
+                            parsed[i] = try std.fmt.parseInt(array_info.child, value.string, 10);
+                        }
+                    },
+                    else => @compileError("unimplemented"),
+                }
+
                 return parsed;
             },
             else => @compileError("unimplemented"),
@@ -164,6 +184,25 @@ test "simple list" {
     try testing.expect(mem.eql(u8, list[0].string, "a"));
     try testing.expect(mem.eql(u8, list[1].string, "b"));
     try testing.expect(mem.eql(u8, list[2].string, "c"));
+}
+
+test "simple list typed as array" {
+    const source =
+        \\- 0
+        \\- 1
+        \\- 2
+    ;
+
+    var yaml = try Yaml.load(testing.allocator, source);
+    defer yaml.deinit();
+
+    try testing.expectEqual(yaml.docs.items.len, 1);
+
+    const arr = try yaml.parse([3]usize);
+    try testing.expectEqual(arr.len, 3);
+    try testing.expectEqual(arr[0], 0);
+    try testing.expectEqual(arr[1], 1);
+    try testing.expectEqual(arr[2], 2);
 }
 
 test "simple map untyped" {
