@@ -506,6 +506,7 @@ const Parser = struct {
         _ = try self.expectToken(.FlowSeqStart);
 
         while (true) {
+            _ = self.eatToken(.NewLine);
             self.eatCommentsAndSpace();
 
             const pos = self.token_it.pos;

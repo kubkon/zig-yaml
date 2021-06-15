@@ -448,7 +448,9 @@ test "inline list" {
 
 test "inline list as mapping value" {
     const source =
-        \\key : [name        , hr, avg  ]
+        \\key : [
+        \\        name        ,
+        \\        hr, avg  ]
     ;
 
     var tree = Tree.init(testing.allocator);
