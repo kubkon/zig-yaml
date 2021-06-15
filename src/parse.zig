@@ -312,6 +312,10 @@ const Parser = struct {
                     const list_node = try self.list(pos);
                     node.value = &list_node.base;
                 },
+                .FlowSeqStart => {
+                    const list_node = try self.list_bracketed(pos);
+                    node.value = &list_node.base;
+                },
                 .DocEnd => {
                     if (explicit_doc) break;
                     return error.UnexpectedToken;
@@ -394,6 +398,10 @@ const Parser = struct {
                             const leaf_node = try self.leaf_value(value_pos);
                             break :value &leaf_node.base;
                         },
+                        .FlowSeqStart => {
+                            const list_node = try self.list_bracketed(value_pos);
+                            break :value &list_node.base;
+                        },
                         else => {
                             log.err("{}", .{key});
                             return error.Unhandled;
@@ -460,6 +468,10 @@ const Parser = struct {
                             break :value &leaf_node.base;
                         }
                     },
+                    .FlowSeqStart => {
+                        const list_node = try self.list_bracketed(pos);
+                        break :value &list_node.base;
+                    },
                     else => {
                         log.err("{}", .{token});
                         return error.Unhandled;
@@ -469,6 +481,61 @@ const Parser = struct {
             try node.values.append(self.allocator, value);
 
             _ = self.eatToken(.NewLine);
+        }
+
+        node.end = self.token_it.pos - 1;
+
+        log.debug("List end: {}, {}", .{ node.end.?, self.tree.tokens[node.end.?] });
+
+        return node;
+    }
+
+    fn list_bracketed(self: *Parser, start: TokenIndex) ParseError!*Node.List {
+        const node = try self.allocator.create(Node.List);
+        errdefer self.allocator.destroy(node);
+        node.* = .{
+            .start = start,
+        };
+        node.base.tree = self.tree;
+
+        self.token_it.seekTo(start);
+
+        log.debug("List start: {}, {}", .{ start, self.tree.tokens[start] });
+        log.debug("Current scope: {}", .{self.scopes.items[self.scopes.items.len - 1]});
+
+        _ = try self.expectToken(.FlowSeqStart);
+
+        while (true) {
+            self.eatCommentsAndSpace();
+
+            const pos = self.token_it.pos;
+            const token = self.token_it.next();
+
+            log.debug("Next token: {}, {}", .{ pos, token });
+
+            const value: *Node = value: {
+                switch (token.id) {
+                    .FlowSeqStart => {
+                        const list_node = try self.list_bracketed(pos);
+                        break :value &list_node.base;
+                    },
+                    .FlowSeqEnd => {
+                        _ = self.eatToken(.NewLine);
+                        break;
+                    },
+                    .Literal => {
+                        const leaf_node = try self.leaf_value(pos);
+                        _ = self.eatToken(.Comma);
+                        // TODO newline
+                        break :value &leaf_node.base;
+                    },
+                    else => {
+                        log.err("{}", .{token});
+                        return error.Unhandled;
+                    },
+                }
+            };
+            try node.values.append(self.allocator, value);
         }
 
         node.end = self.token_it.pos - 1;

@@ -297,8 +297,8 @@ test "map of list of maps" {
 test "list of lists" {
     const source =
         \\- [name        , hr, avg  ]
-        \\- [Mark McGwire, 65, 0.278]
-        \\- [Sammy Sosa  , 63, 0.288]
+        \\- [MarkMcGwire , 65, 0.278]
+        \\- [SammySosa   , 63, 0.288]
     ;
 
     var tree = Tree.init(testing.allocator);
@@ -355,7 +355,7 @@ test "list of lists" {
             try testing.expectEqual(nested.values.items[0].tag, .value);
             const value = nested.values.items[0].cast(Node.Value).?;
             const leaf = tree.tokens[value.value.?];
-            try testing.expect(mem.eql(u8, "Mark McGwire", tree.source[leaf.start..leaf.end]));
+            try testing.expect(mem.eql(u8, "MarkMcGwire", tree.source[leaf.start..leaf.end]));
         }
 
         {
@@ -382,7 +382,7 @@ test "list of lists" {
             try testing.expectEqual(nested.values.items[0].tag, .value);
             const value = nested.values.items[0].cast(Node.Value).?;
             const leaf = tree.tokens[value.value.?];
-            try testing.expect(mem.eql(u8, "Sammy Sosa", tree.source[leaf.start..leaf.end]));
+            try testing.expect(mem.eql(u8, "SammySosa", tree.source[leaf.start..leaf.end]));
         }
 
         {
@@ -398,5 +398,105 @@ test "list of lists" {
             const leaf = tree.tokens[value.value.?];
             try testing.expect(mem.eql(u8, "0.288", tree.source[leaf.start..leaf.end]));
         }
+    }
+}
+
+test "inline list" {
+    const source =
+        \\[name        , hr, avg  ]
+    ;
+
+    var tree = Tree.init(testing.allocator);
+    defer tree.deinit();
+    try tree.parse(source);
+
+    try testing.expectEqual(tree.docs.items.len, 1);
+
+    const doc = tree.docs.items[0].cast(Node.Doc).?;
+    try testing.expectEqual(doc.start.?, 0);
+    try testing.expectEqual(doc.end.?, tree.tokens.len - 1);
+
+    try testing.expect(doc.value != null);
+    try testing.expectEqual(doc.value.?.tag, .list);
+
+    const list = doc.value.?.cast(Node.List).?;
+    try testing.expectEqual(list.start.?, 0);
+    try testing.expectEqual(list.end.?, tree.tokens.len - 2);
+    try testing.expectEqual(list.values.items.len, 3);
+
+    {
+        try testing.expectEqual(list.values.items[0].tag, .value);
+        const value = list.values.items[0].cast(Node.Value).?;
+        const leaf = tree.tokens[value.value.?];
+        try testing.expect(mem.eql(u8, "name", tree.source[leaf.start..leaf.end]));
+    }
+
+    {
+        try testing.expectEqual(list.values.items[1].tag, .value);
+        const value = list.values.items[1].cast(Node.Value).?;
+        const leaf = tree.tokens[value.value.?];
+        try testing.expect(mem.eql(u8, "hr", tree.source[leaf.start..leaf.end]));
+    }
+
+    {
+        try testing.expectEqual(list.values.items[2].tag, .value);
+        const value = list.values.items[2].cast(Node.Value).?;
+        const leaf = tree.tokens[value.value.?];
+        try testing.expect(mem.eql(u8, "avg", tree.source[leaf.start..leaf.end]));
+    }
+}
+
+test "inline list as mapping value" {
+    const source =
+        \\key : [name        , hr, avg  ]
+    ;
+
+    var tree = Tree.init(testing.allocator);
+    defer tree.deinit();
+    try tree.parse(source);
+
+    try testing.expectEqual(tree.docs.items.len, 1);
+
+    const doc = tree.docs.items[0].cast(Node.Doc).?;
+    try testing.expectEqual(doc.start.?, 0);
+    try testing.expectEqual(doc.end.?, tree.tokens.len - 1);
+
+    try testing.expect(doc.value != null);
+    try testing.expectEqual(doc.value.?.tag, .map);
+
+    const map = doc.value.?.cast(Node.Map).?;
+    try testing.expectEqual(map.start.?, 0);
+    try testing.expectEqual(map.end.?, tree.tokens.len - 2);
+    try testing.expectEqual(map.values.items.len, 1);
+
+    const entry = map.values.items[0];
+    const key = tree.tokens[entry.key];
+    try testing.expectEqual(key.id, .Literal);
+    try testing.expect(mem.eql(u8, "key", tree.source[key.start..key.end]));
+
+    const list = entry.value.cast(Node.List).?;
+    try testing.expectEqual(list.start.?, 4);
+    try testing.expectEqual(list.end.?, tree.tokens.len - 2);
+    try testing.expectEqual(list.values.items.len, 3);
+
+    {
+        try testing.expectEqual(list.values.items[0].tag, .value);
+        const value = list.values.items[0].cast(Node.Value).?;
+        const leaf = tree.tokens[value.value.?];
+        try testing.expect(mem.eql(u8, "name", tree.source[leaf.start..leaf.end]));
+    }
+
+    {
+        try testing.expectEqual(list.values.items[1].tag, .value);
+        const value = list.values.items[1].cast(Node.Value).?;
+        const leaf = tree.tokens[value.value.?];
+        try testing.expect(mem.eql(u8, "hr", tree.source[leaf.start..leaf.end]));
+    }
+
+    {
+        try testing.expectEqual(list.values.items[2].tag, .value);
+        const value = list.values.items[2].cast(Node.Value).?;
+        const leaf = tree.tokens[value.value.?];
+        try testing.expect(mem.eql(u8, "avg", tree.source[leaf.start..leaf.end]));
     }
 }
