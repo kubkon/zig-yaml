@@ -77,8 +77,9 @@ pub const Value = union(enum) {
 
             return Value{ .list = out_list.toOwnedSlice() };
         } else if (node.cast(Node.Value)) |value| {
-            const tok = tree.tokens[value.value.?];
-            const raw = tree.source[tok.start..tok.end];
+            const start = tree.tokens[value.start.?];
+            const end = tree.tokens[value.end.?];
+            const raw = tree.source[start.start..end.end];
 
             try_int: {
                 // TODO infer base for int
@@ -229,7 +230,7 @@ pub const Yaml = struct {
     }
 };
 
-test "" {
+test {
     testing.refAllDecls(@This());
 }
 
@@ -309,15 +310,17 @@ test "simple map untyped" {
 test "simple map typed" {
     const source =
         \\a: 0
-        \\b: hello
+        \\b: hello there
+        \\c: 'wait, what?'
     ;
 
     var yaml = try Yaml.load(testing.allocator, source);
     defer yaml.deinit();
 
-    const simple = try yaml.parse(struct { a: usize, b: []const u8 });
+    const simple = try yaml.parse(struct { a: usize, b: []const u8, c: []const u8 });
     try testing.expectEqual(simple.a, 0);
-    try testing.expect(mem.eql(u8, simple.b, "hello"));
+    try testing.expect(mem.eql(u8, simple.b, "hello there"));
+    try testing.expect(mem.eql(u8, simple.c, "wait, what?"));
 }
 
 test "multidoc typed not supported yet" {

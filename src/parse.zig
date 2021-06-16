@@ -167,7 +167,8 @@ pub const Node = struct {
 
     pub const Value = struct {
         base: Node = Node{ .tag = Tag.value, .tree = undefined },
-        value: ?TokenIndex = null,
+        start: ?TokenIndex = null,
+        end: ?TokenIndex = null,
 
         pub const base_tag: Node.Tag = .value;
 
@@ -179,9 +180,10 @@ pub const Node = struct {
             options: std.fmt.FormatOptions,
             writer: anytype,
         ) !void {
-            const token = self.base.tree.tokens[self.value.?];
+            const start = self.base.tree.tokens[self.start.?];
+            const end = self.base.tree.tokens[self.end.?];
             return std.fmt.format(writer, "Value {{ .value = {s} }}", .{
-                self.base.tree.source[token.start..token.end],
+                self.base.tree.source[start.start..end.end],
             });
         }
     };
@@ -303,7 +305,7 @@ const Parser = struct {
                 .Tag => {
                     return error.UnexpectedTag;
                 },
-                .Literal => {
+                .Literal, .SingleQuote, .DoubleQuote => {
                     _ = try self.expectToken(.MapValueInd);
                     const map_node = try self.map(pos);
                     node.value = &map_node.base;
@@ -374,7 +376,7 @@ const Parser = struct {
                     const value_pos = self.token_it.pos;
                     const value = self.token_it.next();
                     switch (value.id) {
-                        .Literal => {
+                        .Literal, .SingleQuote, .DoubleQuote => {
                             // Assume nested map.
                             const map_node = try self.map(value_pos);
                             break :value &map_node.base;
@@ -393,7 +395,7 @@ const Parser = struct {
                     const value_pos = self.token_it.pos;
                     const value = self.token_it.next();
                     switch (value.id) {
-                        .Literal => {
+                        .Literal, .SingleQuote, .DoubleQuote => {
                             // Assume leaf value.
                             const leaf_node = try self.leaf_value(value_pos);
                             break :value &leaf_node.base;
@@ -454,7 +456,7 @@ const Parser = struct {
             const token = self.token_it.next();
             const value: *Node = value: {
                 switch (token.id) {
-                    .Literal => {
+                    .Literal, .SingleQuote, .DoubleQuote => {
                         if (self.eatToken(.MapValueInd)) |_| {
                             if (self.eatToken(.NewLine)) |_| {
                                 try self.openScope();
@@ -524,7 +526,7 @@ const Parser = struct {
                         _ = self.eatToken(.NewLine);
                         break;
                     },
-                    .Literal => {
+                    .Literal, .SingleQuote, .DoubleQuote => {
                         const leaf_node = try self.leaf_value(pos);
                         _ = self.eatToken(.Comma);
                         // TODO newline
@@ -550,14 +552,73 @@ const Parser = struct {
         const node = try self.allocator.create(Node.Value);
         errdefer self.allocator.destroy(node);
         node.* = .{
-            .value = start,
+            .start = start,
         };
         node.base.tree = self.tree;
 
         self.token_it.seekTo(start);
-        const token = self.token_it.next();
 
-        log.debug("Leaf value: {}, '{s}'", .{ token, self.tree.source[token.start..token.end] });
+        log.debug("Leaf start: {}, {}", .{ node.start.?, self.tree.tokens[node.start.?] });
+
+        parse: {
+            if (self.eatToken(.SingleQuote)) |_| {
+                node.start = node.start.? + 1;
+                while (true) {
+                    const pos = self.token_it.pos;
+                    const tok = self.token_it.next();
+                    switch (tok.id) {
+                        .SingleQuote => {
+                            node.end = self.token_it.pos - 2;
+                            break :parse;
+                        },
+                        .NewLine => return error.UnexpectedToken,
+                        else => {},
+                    }
+                }
+            }
+
+            if (self.eatToken(.DoubleQuote)) |_| {
+                node.start = node.start.? + 1;
+                while (true) {
+                    const pos = self.token_it.pos;
+                    const tok = self.token_it.next();
+                    switch (tok.id) {
+                        .DoubleQuote => {
+                            node.end = self.token_it.pos - 2;
+                            break :parse;
+                        },
+                        .NewLine => return error.UnexpectedToken,
+                        else => {},
+                    }
+                }
+            }
+
+            // TODO handle multiline strings in new block scope
+            while (true) {
+                const pos = self.token_it.pos;
+                const tok = self.token_it.next();
+                switch (tok.id) {
+                    .Literal => {},
+                    .Space => {
+                        const trailing = self.token_it.pos - 2;
+                        self.eatCommentsAndSpace();
+                        if (self.token_it.peek()) |peek| {
+                            if (peek.id != .Literal) {
+                                node.end = trailing;
+                                break;
+                            }
+                        }
+                    },
+                    else => {
+                        self.token_it.seekBy(-1);
+                        node.end = self.token_it.pos - 1;
+                        break;
+                    },
+                }
+            }
+        }
+
+        log.debug("Leaf end: {}, {}", .{ node.end.?, self.tree.tokens[node.end.?] });
 
         return node;
     }
