@@ -1,5 +1,6 @@
 const std = @import("std");
 const assert = std.debug.assert;
+const math = std.math;
 const mem = std.mem;
 const testing = std.testing;
 const log = std.log.scoped(.yaml);
@@ -13,10 +14,12 @@ const Node = parse.Node;
 const Tree = parse.Tree;
 const ParseError = parse.ParseError;
 
-pub const YamlError = error{UnexpectedNodeType} || ParseError;
+pub const YamlError = error{UnexpectedNodeType} || ParseError || std.fmt.ParseIntError;
 
 pub const Value = union(enum) {
     empty,
+    int: u64,
+    float: f64,
     string: []const u8,
     list: []Value,
     map: std.StringArrayHashMapUnmanaged(Value),
@@ -75,8 +78,18 @@ pub const Value = union(enum) {
             return Value{ .list = out_list.toOwnedSlice() };
         } else if (node.cast(Node.Value)) |value| {
             const tok = tree.tokens[value.value.?];
-            const string = tree.source[tok.start..tok.end];
-            return Value{ .string = string };
+            const raw = tree.source[tok.start..tok.end];
+
+            try_int: {
+                // TODO infer base for int
+                const int = std.fmt.parseInt(u64, raw, 10) catch break :try_int;
+                return Value{ .int = int };
+            }
+            try_float: {
+                const float = std.fmt.parseFloat(f64, raw) catch break :try_float;
+                return Value{ .float = float };
+            }
+            return Value{ .string = raw };
         } else {
             log.err("Unexpected node type: {}", .{node.tag});
             return error.UnexpectedNodeType;
@@ -126,7 +139,8 @@ pub const Yaml = struct {
         MultiDocUnsupported,
         StructFieldMissing,
         ArraySizeMismatch,
-    } || std.fmt.ParseIntError;
+        Overflow,
+    };
 
     pub fn parse(self: *Yaml, comptime T: type) Error!T {
         if (self.docs.items.len == 0) return error.EmptyYaml;
@@ -142,9 +156,29 @@ pub const Yaml = struct {
 
                     switch (@typeInfo(field.field_type)) {
                         .Int => {
-                            @field(parsed, field.name) = try std.fmt.parseInt(field.field_type, value.string, 10);
+                            @field(parsed, field.name) = try math.cast(field.field_type, value.int);
                         },
-                        else => @compileError("unimplemented"),
+                        .Pointer => |ptr_info| {
+                            switch (ptr_info.size) {
+                                .One => @compileError("unimplemented for pointer to " ++ @typeName(ptr_info.child)),
+                                .Slice => {
+                                    switch (@typeInfo(ptr_info.child)) {
+                                        .Int => |int_info| {
+                                            if (int_info.bits == 8) {
+                                                @field(parsed, field.name) = value.string;
+                                            } else {
+                                                @field(parsed, field.name) = try math.cast(field.field_type, value.int);
+                                            }
+                                        },
+                                        else => @compileError("unimplemented for " ++ @typeName(ptr_info.child)),
+                                    }
+                                },
+                                else => @compileError("unimplemented for pointer to many " ++ @typeName(ptr_info.child)),
+                            }
+                        },
+                        else => {
+                            @compileError("unimplemented for " ++ @typeName(field.field_type));
+                        },
                     }
                 }
 
@@ -159,7 +193,29 @@ pub const Yaml = struct {
                 switch (@typeInfo(array_info.child)) {
                     .Int => {
                         for (list) |value, i| {
-                            parsed[i] = try std.fmt.parseInt(array_info.child, value.string, 10);
+                            parsed[i] = try math.cast(array_info.child, value.int);
+                        }
+                    },
+                    .Pointer => |ptr_info| {
+                        switch (ptr_info.size) {
+                            .One => @compileError("unimplemented for pointer to " ++ @typeName(ptr_info.child)),
+                            .Slice => {
+                                switch (@typeInfo(ptr_info.child)) {
+                                    .Int => |int_info| {
+                                        if (int_info.bits == 8) {
+                                            for (list) |value, i| {
+                                                parsed[i] = value.string;
+                                            }
+                                        } else {
+                                            for (list) |value, i| {
+                                                parsed[i] = try math.cast(field.field_type, value.int);
+                                            }
+                                        }
+                                    },
+                                    else => @compileError("unimplemented for " ++ @typeName(ptr_info.child)),
+                                }
+                            },
+                            else => @compileError("unimplemented for pointer to many " ++ @typeName(ptr_info.child)),
                         }
                     },
                     else => @compileError("unimplemented"),
@@ -197,7 +253,26 @@ test "simple list" {
     try testing.expect(mem.eql(u8, list[2].string, "c"));
 }
 
-test "simple list typed as array" {
+test "simple list typed as array of strings" {
+    const source =
+        \\- a
+        \\- b
+        \\- c
+    ;
+
+    var yaml = try Yaml.load(testing.allocator, source);
+    defer yaml.deinit();
+
+    try testing.expectEqual(yaml.docs.items.len, 1);
+
+    const arr = try yaml.parse([3][]const u8);
+    try testing.expectEqual(arr.len, 3);
+    try testing.expect(mem.eql(u8, arr[0], "a"));
+    try testing.expect(mem.eql(u8, arr[1], "b"));
+    try testing.expect(mem.eql(u8, arr[2], "c"));
+}
+
+test "simple list typed as array of ints" {
     const source =
         \\- 0
         \\- 1
@@ -209,7 +284,7 @@ test "simple list typed as array" {
 
     try testing.expectEqual(yaml.docs.items.len, 1);
 
-    const arr = try yaml.parse([3]usize);
+    const arr = try yaml.parse([3]u8);
     try testing.expectEqual(arr.len, 3);
     try testing.expectEqual(arr[0], 0);
     try testing.expectEqual(arr[1], 1);
@@ -228,19 +303,21 @@ test "simple map untyped" {
 
     const map = yaml.docs.items[0].map;
     try testing.expect(map.contains("a"));
-    try testing.expect(mem.eql(u8, map.get("a").?.string, "0"));
+    try testing.expectEqual(map.get("a").?.int, 0);
 }
 
 test "simple map typed" {
     const source =
         \\a: 0
+        \\b: hello
     ;
 
     var yaml = try Yaml.load(testing.allocator, source);
     defer yaml.deinit();
 
-    const simple = try yaml.parse(struct { a: usize });
+    const simple = try yaml.parse(struct { a: usize, b: []const u8 });
     try testing.expectEqual(simple.a, 0);
+    try testing.expect(mem.eql(u8, simple.b, "hello"));
 }
 
 test "multidoc typed not supported yet" {
