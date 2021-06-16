@@ -298,10 +298,6 @@ const Parser = struct {
             log.debug("Next token: {}, {}", .{ pos, token });
 
             switch (token.id) {
-                .DocStart => {
-                    // TODO this should be an error token
-                    return error.NestedDocuments;
-                },
                 .Tag => {
                     return error.UnexpectedTag;
                 },
@@ -322,11 +318,13 @@ const Parser = struct {
                     if (explicit_doc) break;
                     return error.UnexpectedToken;
                 },
-                .Eof => {
-                    if (!explicit_doc) break;
-                    return error.UnexpectedEof;
+                .DocStart, .Eof => {
+                    self.token_it.seekBy(-1);
+                    break;
                 },
-                else => {},
+                else => {
+                    return error.UnexpectedToken;
+                },
             }
         }
 

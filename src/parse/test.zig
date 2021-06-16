@@ -76,7 +76,7 @@ test "leaf in quotes" {
 
     const doc = tree.docs.items[0].cast(Node.Doc).?;
     try testing.expectEqual(doc.start.?, 0);
-    try testing.expectEqual(doc.end.?, tree.tokens.len - 1);
+    try testing.expectEqual(doc.end.?, tree.tokens.len - 2);
     try testing.expect(doc.directive == null);
 
     try testing.expect(doc.value != null);
@@ -127,7 +127,7 @@ test "nested maps" {
 
     const doc = tree.docs.items[0].cast(Node.Doc).?;
     try testing.expectEqual(doc.start.?, 0);
-    try testing.expectEqual(doc.end.?, tree.tokens.len - 1);
+    try testing.expectEqual(doc.end.?, tree.tokens.len - 2);
     try testing.expect(doc.directive == null);
 
     try testing.expect(doc.value != null);
@@ -226,7 +226,7 @@ test "map of list of values" {
 
     const doc = tree.docs.items[0].cast(Node.Doc).?;
     try testing.expectEqual(doc.start.?, 0);
-    try testing.expectEqual(doc.end.?, tree.tokens.len - 1);
+    try testing.expectEqual(doc.end.?, tree.tokens.len - 2);
 
     try testing.expect(doc.value != null);
     try testing.expectEqual(doc.value.?.tag, .map);
@@ -284,7 +284,7 @@ test "map of list of maps" {
 
     const doc = tree.docs.items[0].cast(Node.Doc).?;
     try testing.expectEqual(doc.start.?, 0);
-    try testing.expectEqual(doc.end.?, tree.tokens.len - 1);
+    try testing.expectEqual(doc.end.?, tree.tokens.len - 2);
 
     try testing.expect(doc.value != null);
     try testing.expectEqual(doc.value.?.tag, .map);
@@ -359,7 +359,7 @@ test "list of lists" {
 
     const doc = tree.docs.items[0].cast(Node.Doc).?;
     try testing.expectEqual(doc.start.?, 0);
-    try testing.expectEqual(doc.end.?, tree.tokens.len - 1);
+    try testing.expectEqual(doc.end.?, tree.tokens.len - 2);
 
     try testing.expect(doc.value != null);
     try testing.expectEqual(doc.value.?.tag, .list);
@@ -466,7 +466,7 @@ test "inline list" {
 
     const doc = tree.docs.items[0].cast(Node.Doc).?;
     try testing.expectEqual(doc.start.?, 0);
-    try testing.expectEqual(doc.end.?, tree.tokens.len - 1);
+    try testing.expectEqual(doc.end.?, tree.tokens.len - 2);
 
     try testing.expect(doc.value != null);
     try testing.expectEqual(doc.value.?.tag, .list);
@@ -513,7 +513,7 @@ test "inline list as mapping value" {
 
     const doc = tree.docs.items[0].cast(Node.Doc).?;
     try testing.expectEqual(doc.start.?, 0);
-    try testing.expectEqual(doc.end.?, tree.tokens.len - 1);
+    try testing.expectEqual(doc.end.?, tree.tokens.len - 2);
 
     try testing.expect(doc.value != null);
     try testing.expectEqual(doc.value.?.tag, .map);
