@@ -16,7 +16,9 @@ const ParseError = parse.ParseError;
 
 pub const YamlError = error{UnexpectedNodeType} || ParseError || std.fmt.ParseIntError;
 
-pub const Value = union(enum) {
+pub const ValueType = enum { empty, int, float, string, list, map };
+
+pub const Value = union(ValueType) {
     empty,
     int: u64,
     float: f64,
@@ -42,13 +44,13 @@ pub const Value = union(enum) {
         }
     }
 
-    fn fromNode(allocator: *Allocator, tree: *const Tree, node: *const Node) YamlError!Value {
+    fn fromNode(allocator: *Allocator, tree: *const Tree, node: *const Node, type_hint: ?ValueType) YamlError!Value {
         if (node.cast(Node.Doc)) |doc| {
             const inner = doc.value orelse {
                 // empty doc
                 return Value{ .empty = .{} };
             };
-            return Value.fromNode(allocator, tree, inner);
+            return Value.fromNode(allocator, tree, inner, null);
         } else if (node.cast(Node.Map)) |map| {
             var out_map: std.StringArrayHashMapUnmanaged(Value) = .{};
             errdefer out_map.deinit(allocator);
@@ -58,7 +60,7 @@ pub const Value = union(enum) {
             for (map.values.items) |entry| {
                 const key_tok = tree.tokens[entry.key];
                 const key = tree.source[key_tok.start..key_tok.end];
-                const value = try Value.fromNode(allocator, tree, entry.value);
+                const value = try Value.fromNode(allocator, tree, entry.value, null);
 
                 out_map.putAssumeCapacityNoClobber(key, value);
             }
@@ -70,9 +72,25 @@ pub const Value = union(enum) {
 
             try out_list.ensureUnusedCapacity(list.values.items.len);
 
-            for (list.values.items) |elem| {
-                const value = try Value.fromNode(allocator, tree, elem);
-                out_list.appendAssumeCapacity(value);
+            if (list.values.items.len > 0) {
+                const hint = if (list.values.items[0].cast(Node.Value)) |value| hint: {
+                    const elem = list.values.items[0];
+                    const start = tree.tokens[value.start.?];
+                    const end = tree.tokens[value.end.?];
+                    const raw = tree.source[start.start..end.end];
+                    _ = std.fmt.parseInt(u64, raw, 10) catch {
+                        _ = std.fmt.parseFloat(f64, raw) catch {
+                            break :hint ValueType.string;
+                        };
+                        break :hint ValueType.float;
+                    };
+                    break :hint ValueType.int;
+                } else null;
+
+                for (list.values.items) |elem| {
+                    const value = try Value.fromNode(allocator, tree, elem, hint);
+                    out_list.appendAssumeCapacity(value);
+                }
             }
 
             return Value{ .list = out_list.toOwnedSlice() };
@@ -80,6 +98,15 @@ pub const Value = union(enum) {
             const start = tree.tokens[value.start.?];
             const end = tree.tokens[value.end.?];
             const raw = tree.source[start.start..end.end];
+
+            if (type_hint) |hint| {
+                return switch (hint) {
+                    .int => Value{ .int = try std.fmt.parseInt(u64, raw, 10) },
+                    .float => Value{ .float = try std.fmt.parseFloat(f64, raw) },
+                    .string => Value{ .string = raw },
+                    else => unreachable,
+                };
+            }
 
             try_int: {
                 // TODO infer base for int
@@ -124,7 +151,7 @@ pub const Yaml = struct {
 
         try docs.ensureUnusedCapacity(allocator, tree.docs.items.len);
         for (tree.docs.items) |node| {
-            const value = try Value.fromNode(allocator, &tree, node);
+            const value = try Value.fromNode(allocator, &tree, node, null);
             docs.appendAssumeCapacity(value);
         }
 
@@ -143,90 +170,110 @@ pub const Yaml = struct {
         Overflow,
     };
 
-    pub fn parse(self: *Yaml, comptime T: type) Error!T {
+    pub fn parse(self: *const Yaml, comptime T: type) Error!T {
         if (self.docs.items.len == 0) return error.EmptyYaml;
         if (self.docs.items.len > 1) return error.MultiDocUnsupported;
 
         switch (@typeInfo(T)) {
-            .Struct => |struct_info| {
-                const map = self.docs.items[0].map;
-                var parsed: T = undefined;
+            .Struct => return self.parseStruct(T, self.docs.items[0].map),
+            .Array => return self.parseArray(T, self.docs.items[0].list),
+            .Void => unreachable,
+            else => @compileError("unimplemented for " ++ @typeName(T)),
+        }
+    }
 
-                inline for (struct_info.fields) |field| {
-                    const value = map.get(field.name) orelse return error.StructFieldMissing;
+    fn parseStruct(self: *const Yaml, comptime T: type, map: anytype) Error!T {
+        const struct_info = @typeInfo(T).Struct;
+        var parsed: T = undefined;
 
-                    switch (@typeInfo(field.field_type)) {
-                        .Int => {
-                            @field(parsed, field.name) = try math.cast(field.field_type, value.int);
-                        },
-                        .Pointer => |ptr_info| {
-                            switch (ptr_info.size) {
-                                .One => @compileError("unimplemented for pointer to " ++ @typeName(ptr_info.child)),
-                                .Slice => {
-                                    switch (@typeInfo(ptr_info.child)) {
-                                        .Int => |int_info| {
-                                            if (int_info.bits == 8) {
-                                                @field(parsed, field.name) = value.string;
-                                            } else {
-                                                @field(parsed, field.name) = try math.cast(field.field_type, value.int);
-                                            }
-                                        },
-                                        else => @compileError("unimplemented for " ++ @typeName(ptr_info.child)),
+        inline for (struct_info.fields) |field| {
+            const value = map.get(field.name) orelse return error.StructFieldMissing;
+
+            switch (@typeInfo(field.field_type)) {
+                .Int => {
+                    @field(parsed, field.name) = try math.cast(field.field_type, value.int);
+                },
+                .Float => {
+                    @field(parsed, field.name) = math.lossyCast(field.field_type, value.float);
+                },
+                .Pointer => |ptr_info| {
+                    switch (ptr_info.size) {
+                        .One => @compileError("unimplemented for pointer to " ++ @typeName(ptr_info.child)),
+                        .Slice => {
+                            switch (@typeInfo(ptr_info.child)) {
+                                .Int => |int_info| {
+                                    if (int_info.bits == 8) {
+                                        @field(parsed, field.name) = value.string;
+                                    } else {
+                                        @field(parsed, field.name) = try math.cast(field.field_type, value.int);
                                     }
                                 },
-                                else => @compileError("unimplemented for pointer to many " ++ @typeName(ptr_info.child)),
+                                .Float => {
+                                    @field(parsed, field.name) = math.lossyCast(field.field_type, value.float);
+                                },
+                                else => @compileError("unimplemented for " ++ @typeName(ptr_info.child)),
                             }
                         },
-                        else => {
-                            @compileError("unimplemented for " ++ @typeName(field.field_type));
-                        },
+                        else => @compileError("unimplemented for pointer to many " ++ @typeName(ptr_info.child)),
                     }
+                },
+                .Array => {
+                    @field(parsed, field.name) = try self.parseArray(field.field_type, value.list);
+                },
+                else => @compileError("unimplemented for " ++ @typeName(field.field_type)),
+            }
+        }
+
+        return parsed;
+    }
+
+    fn parseArray(self: *const Yaml, comptime T: type, list: []Value) Error!T {
+        const array_info = @typeInfo(T).Array;
+        if (array_info.len != list.len) return error.ArraySizeMismatch;
+
+        var parsed: T = undefined;
+        switch (@typeInfo(array_info.child)) {
+            .Int => {
+                for (list) |value, i| {
+                    parsed[i] = try math.cast(array_info.child, value.int);
                 }
-
-                return parsed;
             },
-            .Array => |array_info| {
-                const list = self.docs.items[0].list;
-
-                if (array_info.len != list.len) return error.ArraySizeMismatch;
-
-                var parsed: T = undefined;
-                switch (@typeInfo(array_info.child)) {
-                    .Int => {
-                        for (list) |value, i| {
-                            parsed[i] = try math.cast(array_info.child, value.int);
-                        }
-                    },
-                    .Pointer => |ptr_info| {
-                        switch (ptr_info.size) {
-                            .One => @compileError("unimplemented for pointer to " ++ @typeName(ptr_info.child)),
-                            .Slice => {
-                                switch (@typeInfo(ptr_info.child)) {
-                                    .Int => |int_info| {
-                                        if (int_info.bits == 8) {
-                                            for (list) |value, i| {
-                                                parsed[i] = value.string;
-                                            }
-                                        } else {
-                                            for (list) |value, i| {
-                                                parsed[i] = try math.cast(field.field_type, value.int);
-                                            }
-                                        }
-                                    },
-                                    else => @compileError("unimplemented for " ++ @typeName(ptr_info.child)),
+            .Float => {
+                for (list) |value, i| {
+                    parsed[i] = math.lossyCast(array_info.child, value.float);
+                }
+            },
+            .Pointer => |ptr_info| {
+                switch (ptr_info.size) {
+                    .One => @compileError("unimplemented for pointer to " ++ @typeName(ptr_info.child)),
+                    .Slice => {
+                        switch (@typeInfo(ptr_info.child)) {
+                            .Int => |int_info| {
+                                if (int_info.bits == 8) {
+                                    for (list) |value, i| {
+                                        parsed[i] = value.string;
+                                    }
+                                } else {
+                                    for (list) |value, i| {
+                                        parsed[i] = try math.cast(field.field_type, value.int);
+                                    }
                                 }
                             },
-                            else => @compileError("unimplemented for pointer to many " ++ @typeName(ptr_info.child)),
+                            .Float => {
+                                for (list) |value, i| {
+                                    parsed[i] = math.lossyCast(field.field_type, value.float);
+                                }
+                            },
+                            else => @compileError("unimplemented for " ++ @typeName(ptr_info.child)),
                         }
                     },
-                    else => @compileError("unimplemented"),
+                    else => @compileError("unimplemented for pointer to many " ++ @typeName(ptr_info.child)),
                 }
-
-                return parsed;
             },
-            .Void => unreachable,
-            else => @compileError("unimplemented"),
+            else => @compileError("unimplemented for " ++ @typeName(array_info.child)),
         }
+
+        return parsed;
     }
 };
 
