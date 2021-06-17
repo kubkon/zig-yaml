@@ -3,6 +3,9 @@ const assert = std.debug.assert;
 const math = std.math;
 const mem = std.mem;
 const testing = std.testing;
+
+pub const log_level: std.log.Level = .debug;
+
 const log = std.log.scoped(.yaml);
 
 const Allocator = mem.Allocator;
@@ -95,7 +98,11 @@ pub const Value = union(ValueType) {
                 return switch (hint) {
                     .int => Value{ .int = try std.fmt.parseInt(i64, raw, 10) },
                     .float => Value{ .float = try std.fmt.parseFloat(f64, raw) },
-                    .string => Value{ .string = try arena.dupe(u8, raw) },
+                    .string => switch (value.escape_mode) {
+                        .None => Value{ .string = try arena.dupe(u8, raw) },
+                        .DoubleQuote => Value{ .string = value.string_value.items },
+                        .SingleQuote => Value{ .string = value.string_value.items },
+                    },
                     else => unreachable,
                 };
             }
@@ -372,6 +379,45 @@ test "typed nested structs" {
     });
     try testing.expect(mem.eql(u8, simple.a.b, "hello there"));
     try testing.expect(mem.eql(u8, simple.a.c, "wait, what?"));
+}
+
+test "single quoted string" {
+    const source =
+        \\- 'hello'
+        \\- 'here''s an escaped quote'
+        \\- 'newlines and tabs\nare not\tsupported'
+    ;
+
+    var yaml = try Yaml.load(testing.allocator, source);
+    defer yaml.deinit();
+
+    const arr = try yaml.parse([3][]const u8);
+    try testing.expectEqual(arr.len, 3);
+    try testing.expect(mem.eql(u8, arr[0], "hello"));
+    try testing.expect(mem.eql(u8, arr[1], "here's an escaped quote"));
+    try testing.expect(mem.eql(u8, arr[2], "newlines and tabs\\nare not\\tsupported"));
+}
+
+test "double quoted string" {
+    const source =
+        \\- "hello"
+        \\- "\"here\" are some escaped quotes"
+        \\- "newlines and tabs\nare\tsupported"
+    ;
+
+    var yaml = try Yaml.load(testing.allocator, source);
+    defer yaml.deinit();
+
+    const arr = try yaml.parse([3][]const u8);
+    try testing.expectEqual(arr.len, 3);
+    try testing.expect(mem.eql(u8, arr[0], "hello"));
+    try testing.expect(mem.eql(u8, arr[1],
+        \\"here" are some escaped quotes
+    ));
+    try testing.expect(mem.eql(u8, arr[2],
+        \\newlines and tabs
+        \\are	supported
+    ));
 }
 
 test "multidoc typed not supported yet" {

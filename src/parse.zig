@@ -1,4 +1,5 @@
 const std = @import("std");
+const ArrayList = std.ArrayList;
 const assert = std.debug.assert;
 const log = std.log.scoped(.parse);
 const mem = std.mem;
@@ -169,10 +170,14 @@ pub const Node = struct {
         base: Node = Node{ .tag = Tag.value, .tree = undefined },
         start: ?TokenIndex = null,
         end: ?TokenIndex = null,
+        escape_mode: EscapeMode = .None,
+        string_value: ArrayList(u8) = undefined,
 
         pub const base_tag: Node.Tag = .value;
 
-        pub fn deinit(self: *Value, allocator: *Allocator) void {}
+        pub fn deinit(self: *Value, allocator: *Allocator) void {
+            self.string_value.deinit();
+        }
 
         pub fn format(
             self: *const Value,
@@ -186,6 +191,12 @@ pub const Node = struct {
                 self.base.tree.source[start.start..end.end],
             });
         }
+
+        const EscapeMode = enum {
+            None,
+            SingleQuote,
+            DoubleQuote,
+        };
     };
 };
 
@@ -551,7 +562,10 @@ const Parser = struct {
         errdefer self.allocator.destroy(node);
         node.* = .{
             .start = start,
+            .string_value = ArrayList(u8).init(self.allocator),
         };
+        errdefer node.string_value.deinit();
+
         node.base.tree = self.tree;
 
         self.token_it.seekTo(start);
@@ -560,6 +574,7 @@ const Parser = struct {
 
         parse: {
             if (self.eatToken(.SingleQuote)) |_| {
+                node.escape_mode = .SingleQuote;
                 node.start = node.start.? + 1;
                 while (true) {
                     const pos = self.token_it.pos;
@@ -570,12 +585,27 @@ const Parser = struct {
                             break :parse;
                         },
                         .NewLine => return error.UnexpectedToken,
-                        else => {},
+                        else => {
+                            var i: usize = tok.start;
+                            while (i < tok.end) : (i += 1) {
+                                var c = self.tree.source[i];
+                                switch (c) {
+                                    '\'' => {
+                                        try node.string_value.append(c);
+                                        i += 1;
+                                    },
+                                    else => {
+                                        try node.string_value.append(c);
+                                    },
+                                }
+                            }
+                        },
                     }
                 }
             }
 
             if (self.eatToken(.DoubleQuote)) |_| {
+                node.escape_mode = .DoubleQuote;
                 node.start = node.start.? + 1;
                 while (true) {
                     const pos = self.token_it.pos;
@@ -586,7 +616,34 @@ const Parser = struct {
                             break :parse;
                         },
                         .NewLine => return error.UnexpectedToken,
-                        else => {},
+                        else => {
+                            var i: usize = tok.start;
+                            while (i < tok.end) : (i += 1) {
+                                var c = self.tree.source[i];
+                                switch (c) {
+                                    '\\' => {
+                                        if (i < tok.end) {
+                                            switch (self.tree.source[i + 1]) {
+                                                'n' => {
+                                                    try node.string_value.append('\n');
+                                                },
+                                                't' => {
+                                                    try node.string_value.append('\t');
+                                                },
+                                                '"' => {
+                                                    try node.string_value.append('"');
+                                                },
+                                                else => {},
+                                            }
+                                        }
+                                        i += 1;
+                                    },
+                                    else => {
+                                        try node.string_value.append(c);
+                                    },
+                                }
+                            }
+                        },
                     }
                 }
             }

@@ -6,6 +6,13 @@ const testing = std.testing;
 
 buffer: []const u8,
 index: usize = 0,
+literal_type: LiteralType = .None,
+
+const LiteralType = enum {
+    None,
+    SingleQuote,
+    DoubleQuote,
+};
 
 pub const Token = struct {
     id: Id,
@@ -91,7 +98,9 @@ pub fn next(self: *Tokenizer) Token {
         Tab: usize,
         Hyphen: usize,
         Dot: usize,
+        SingleQuote,
         Literal,
+        EscapeSeq,
     } = .Start;
 
     while (self.index < self.buffer.len) : (self.index += 1) {
@@ -145,11 +154,13 @@ pub fn next(self: *Tokenizer) Token {
                 },
                 '\'' => {
                     result.id = .SingleQuote;
+                    self.literal_type = if (self.literal_type == .SingleQuote) .None else .SingleQuote;
                     self.index += 1;
                     break;
                 },
                 '"' => {
                     result.id = .DoubleQuote;
+                    self.literal_type = if (self.literal_type == .DoubleQuote) .None else .DoubleQuote;
                     self.index += 1;
                     break;
                 },
@@ -177,6 +188,9 @@ pub fn next(self: *Tokenizer) Token {
                     result.id = .FlowMapEnd;
                     self.index += 1;
                     break;
+                },
+                '\\' => {
+                    state = .EscapeSeq;
                 },
                 else => {
                     state = .Literal;
@@ -243,8 +257,28 @@ pub fn next(self: *Tokenizer) Token {
                     state = .Literal;
                 },
             },
+            .SingleQuote => switch (c) {
+                '\'' => {
+                    state = .Literal;
+                },
+                else => { // This was not an escaped single quote. Go back for the literal.
+                    self.index -= 1;
+                    result.id = .Literal;
+                    break;
+                },
+            },
             .Literal => switch (c) {
-                '\r', '\n', ' ', '\'', '"', ',', ':', ']', '}' => {
+                '\'' => {
+                    if (self.literal_type == .SingleQuote) {
+                        state = .SingleQuote;
+                    }
+                },
+                '\\' => {
+                    if (self.literal_type == .DoubleQuote) {
+                        state = .EscapeSeq;
+                    }
+                },
+                '\r', '\n', ' ', '"', ',', ':', ']', '}' => {
                     result.id = .Literal;
                     break;
                 },
@@ -252,11 +286,24 @@ pub fn next(self: *Tokenizer) Token {
                     result.id = .Literal;
                 },
             },
+            .EscapeSeq => {
+                state = .Literal;
+            },
         }
     }
 
-    if (state == .Literal and result.id == .Eof) {
-        result.id = .Literal;
+    if (self.index >= self.buffer.len) {
+        switch (state) {
+            .Literal => {
+                result.id = .Literal;
+            },
+            .SingleQuote => {
+                // We are at the Eof while checking for an escaped single quote. It wasn't, so go back for the literal.
+                result.id = .Literal;
+                self.index -= 1;
+            },
+            else => {},
+        }
     }
 
     result.end = self.index;
@@ -434,6 +481,37 @@ test "part of tdb" {
         .SingleQuote,
         .NewLine,
         .DocEnd,
+        .Eof,
+    });
+}
+
+test "simple map typed" {
+    try testExpected(
+        \\a: 0
+        \\b: hello there
+        \\c: 'wait, what?'
+    , &[_]Token.Id{
+        .Literal,
+        .MapValueInd,
+        .Space,
+        .Literal,
+        .NewLine,
+        .Literal,
+        .MapValueInd,
+        .Space,
+        .Literal,
+        .Space,
+        .Literal,
+        .NewLine,
+        .Literal,
+        .MapValueInd,
+        .Space,
+        .SingleQuote,
+        .Literal,
+        .Comma,
+        .Space,
+        .Literal,
+        .SingleQuote,
         .Eof,
     });
 }
