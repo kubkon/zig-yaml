@@ -7,18 +7,14 @@ const Yaml = @import("yaml").Yaml;
 
 const gpa = testing.allocator;
 
-fn testYaml(file_path: []const u8, comptime T: type, eql: fn (T, T) bool, expected: T) !void {
+fn loadFromFile(file_path: []const u8) !Yaml {
     const file = try std.fs.cwd().openFile(file_path, .{});
     defer file.close();
 
     const source = try file.readToEndAlloc(gpa, std.math.maxInt(u32));
     defer gpa.free(source);
 
-    var parsed = try Yaml.load(gpa, source);
-    defer parsed.deinit();
-
-    const result = try parsed.parse(T);
-    try testing.expect(eql(expected, result));
+    return Yaml.load(gpa, source);
 }
 
 test "simple" {
@@ -55,7 +51,11 @@ test "simple" {
         }
     };
 
-    try testYaml("test/simple.yaml", Simple, Simple.eql, .{
+    var parsed = try loadFromFile("test/simple.yaml");
+    defer parsed.deinit();
+
+    const result = try parsed.parse(Simple);
+    const expected = .{
         .names = &[_][]const u8{ "John Doe", "MacIntosh", "Jane Austin" },
         .numbers = &[_]i16{ 10, -8, 6 },
         .nested = .{
@@ -63,7 +63,8 @@ test "simple" {
             .wick = "john doe",
         },
         .finally = [_]f16{ 8.17, 19.78, 17, 21 },
-    });
+    };
+    try testing.expect(result.eql(expected));
 }
 
 const LibTbd = struct {
@@ -113,7 +114,11 @@ const LibTbd = struct {
 };
 
 test "single lib tbd" {
-    try testYaml("test/single_lib.tbd", LibTbd, LibTbd.eql, .{
+    var parsed = try loadFromFile("test/single_lib.tbd");
+    defer parsed.deinit();
+
+    const result = try parsed.parse(LibTbd);
+    const expected = .{
         .tbd_version = 4,
         .targets = &[_][]const u8{
             "x86_64-macos",
@@ -150,5 +155,6 @@ test "single lib tbd" {
                 },
             },
         },
-    });
+    };
+    try testing.expect(result.eql(expected));
 }

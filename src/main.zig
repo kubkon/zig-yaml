@@ -17,6 +17,7 @@ const ParseError = parse.ParseError;
 
 pub const YamlError = error{
     UnexpectedNodeType,
+    OutOfMemory,
 } || ParseError || std.fmt.ParseIntError;
 
 pub const ValueType = enum {
@@ -52,7 +53,7 @@ pub const Value = union(ValueType) {
 
             for (map.values.items) |entry| {
                 const key_tok = tree.tokens[entry.key];
-                const key = tree.source[key_tok.start..key_tok.end];
+                const key = try arena.dupe(u8, tree.source[key_tok.start..key_tok.end]);
                 const value = try Value.fromNode(arena, tree, entry.value, null);
 
                 out_map.putAssumeCapacityNoClobber(key, value);
@@ -94,7 +95,7 @@ pub const Value = union(ValueType) {
                 return switch (hint) {
                     .int => Value{ .int = try std.fmt.parseInt(i64, raw, 10) },
                     .float => Value{ .float = try std.fmt.parseFloat(f64, raw) },
-                    .string => Value{ .string = raw },
+                    .string => Value{ .string = try arena.dupe(u8, raw) },
                     else => unreachable,
                 };
             }
@@ -108,7 +109,7 @@ pub const Value = union(ValueType) {
                 const float = std.fmt.parseFloat(f64, raw) catch break :try_float;
                 return Value{ .float = float };
             }
-            return Value{ .string = raw };
+            return Value{ .string = try arena.dupe(u8, raw) };
         } else {
             log.err("Unexpected node type: {}", .{node.tag});
             return error.UnexpectedNodeType;
