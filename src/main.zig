@@ -174,7 +174,10 @@ pub const Yaml = struct {
         var parsed: T = undefined;
 
         inline for (struct_info.fields) |field| {
-            const value = map.get(field.name) orelse return error.StructFieldMissing;
+            const value = map.get(field.name) orelse blk: {
+                const field_name = try mem.replaceOwned(u8, &self.arena.allocator, field.name, "_", "-");
+                break :blk map.get(field_name) orelse return error.StructFieldMissing;
+            };
 
             @field(parsed, field.name) = switch (@typeInfo(field.field_type)) {
                 .Int => try math.cast(field.field_type, value.int),
@@ -196,34 +199,23 @@ pub const Yaml = struct {
         switch (ptr_info.size) {
             .One => @compileError("unimplemented for pointer to " ++ @typeName(ptr_info.child)),
             .Slice => {
-                switch (@typeInfo(ptr_info.child)) {
-                    .Int => |int_info| {
-                        if (int_info.bits == 8) {
-                            return value.string;
-                        } else {
-                            var parsed = try arena.alloc(ptr_info.child, value.list.len);
-                            for (value.list) |elem, i| {
-                                parsed[i] = try math.cast(ptr_info.child, elem.int);
-                            }
-                            return parsed;
-                        }
-                    },
-                    .Float => {
-                        var parsed = try arena.alloc(ptr_info.child, value.list.len);
-                        for (value.list) |elem, i| {
-                            parsed[i] = math.lossyCast(ptr_info.child, elem.float);
-                        }
-                        return parsed;
-                    },
-                    .Pointer => |inner_info| {
-                        var parsed = try arena.alloc(ptr_info.child, value.list.len);
-                        for (value.list) |elem, i| {
-                            parsed[i] = try self.parsePointer(ptr_info.child, elem);
-                        }
-                        return parsed;
-                    },
-                    else => @compileError("unimplemented for " ++ @typeName(ptr_info.child)),
+                const child_info = @typeInfo(ptr_info.child);
+                if (child_info == .Int and child_info.Int.bits == 8) {
+                    return value.string;
                 }
+
+                var parsed = try arena.alloc(ptr_info.child, value.list.len);
+                for (value.list) |elem, i| {
+                    parsed[i] = switch (child_info) {
+                        .Int => try math.cast(ptr_info.child, elem.int),
+                        .Float => math.lossyCast(ptr_info.child, elem.float),
+                        .Pointer => try self.parsePointer(ptr_info.child, elem),
+                        .Struct => try self.parseStruct(ptr_info.child, elem.map),
+                        .Array => try self.parseArray(ptr_info.child, elem.list),
+                        else => @compileError("unimplemented for " ++ @typeName(ptr_info.child)),
+                    };
+                }
+                return parsed;
             },
             else => @compileError("unimplemented for pointer to many " ++ @typeName(ptr_info.child)),
         }
@@ -234,19 +226,15 @@ pub const Yaml = struct {
         if (array_info.len != list.len) return error.ArraySizeMismatch;
 
         var parsed: T = undefined;
-        for (list) |value, i| {
-            switch (@typeInfo(array_info.child)) {
-                .Int => {
-                    parsed[i] = try math.cast(array_info.child, value.int);
-                },
-                .Float => {
-                    parsed[i] = math.lossyCast(array_info.child, value.float);
-                },
-                .Pointer => {
-                    parsed[i] = try self.parsePointer(array_info.child, value);
-                },
+        for (list) |elem, i| {
+            parsed[i] = switch (@typeInfo(array_info.child)) {
+                .Int => try math.cast(array_info.child, elem.int),
+                .Float => math.lossyCast(array_info.child, elem.float),
+                .Pointer => try self.parsePointer(array_info.child, elem),
+                .Struct => try self.parseStruct(array_info.child, elem.map),
+                .Array => try self.parseArray(array_info.child, elem.list),
                 else => @compileError("unimplemented for " ++ @typeName(array_info.child)),
-            }
+            };
         }
 
         return parsed;
