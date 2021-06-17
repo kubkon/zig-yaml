@@ -20,7 +20,7 @@ pub const ValueType = enum { empty, int, float, string, list, map };
 
 pub const Value = union(ValueType) {
     empty,
-    int: u64,
+    int: i64,
     float: f64,
     string: []const u8,
     list: []Value,
@@ -78,7 +78,7 @@ pub const Value = union(ValueType) {
                     const start = tree.tokens[value.start.?];
                     const end = tree.tokens[value.end.?];
                     const raw = tree.source[start.start..end.end];
-                    _ = std.fmt.parseInt(u64, raw, 10) catch {
+                    _ = std.fmt.parseInt(i64, raw, 10) catch {
                         _ = std.fmt.parseFloat(f64, raw) catch {
                             break :hint ValueType.string;
                         };
@@ -101,7 +101,7 @@ pub const Value = union(ValueType) {
 
             if (type_hint) |hint| {
                 return switch (hint) {
-                    .int => Value{ .int = try std.fmt.parseInt(u64, raw, 10) },
+                    .int => Value{ .int = try std.fmt.parseInt(i64, raw, 10) },
                     .float => Value{ .float = try std.fmt.parseFloat(f64, raw) },
                     .string => Value{ .string = raw },
                     else => unreachable,
@@ -110,7 +110,7 @@ pub const Value = union(ValueType) {
 
             try_int: {
                 // TODO infer base for int
-                const int = std.fmt.parseInt(u64, raw, 10) catch break :try_int;
+                const int = std.fmt.parseInt(i64, raw, 10) catch break :try_int;
                 return Value{ .int = int };
             }
             try_float: {
@@ -336,6 +336,25 @@ test "simple list typed as array of ints" {
     try testing.expectEqual(arr.len, 3);
     try testing.expectEqual(arr[0], 0);
     try testing.expectEqual(arr[1], 1);
+    try testing.expectEqual(arr[2], 2);
+}
+
+test "list of mixed sign integer" {
+    const source =
+        \\- 0
+        \\- -1
+        \\- 2
+    ;
+
+    var yaml = try Yaml.load(testing.allocator, source);
+    defer yaml.deinit();
+
+    try testing.expectEqual(yaml.docs.items.len, 1);
+
+    const arr = try yaml.parse([3]i8);
+    try testing.expectEqual(arr.len, 3);
+    try testing.expectEqual(arr[0], 0);
+    try testing.expectEqual(arr[1], -1);
     try testing.expectEqual(arr[2], 2);
 }
 
