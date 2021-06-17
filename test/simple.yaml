@@ -3,6 +3,9 @@ numbers:
   - 10
   - -8
   - 6
+nested:
+  some: one
+  wick: john doe
 finally: [ 8.17,
            19.78      , 17 ,
            21 ]

@@ -29,6 +29,10 @@ test "simple" {
     const Simple = struct {
         names: [3][]const u8,
         numbers: [3]i16,
+        nested: struct {
+            some: []const u8,
+            wick: []const u8,
+        },
         finally: [4]f16,
 
         pub fn eql(self: @This(), other: @This()) bool {
@@ -48,6 +52,9 @@ test "simple" {
                 if (lhs != other.finally[i]) return false;
             }
 
+            if (!mem.eql(u8, self.nested.some, other.nested.some)) return false;
+            if (!mem.eql(u8, self.nested.wick, other.nested.wick)) return false;
+
             return true;
         }
     };
@@ -55,6 +62,10 @@ test "simple" {
     try testYaml("test/simple.yaml", Simple, Simple.eql, Simple{
         .names = [_][]const u8{ "John Doe", "MacIntosh", "Jane Austin" },
         .numbers = [_]i16{ 10, -8, 6 },
+        .nested = .{
+            .some = "one",
+            .wick = "john doe",
+        },
         .finally = [_]f16{ 8.17, 19.78, 17, 21 },
     });
 }

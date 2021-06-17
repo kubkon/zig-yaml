@@ -220,6 +220,9 @@ pub const Yaml = struct {
                 .Array => {
                     @field(parsed, field.name) = try self.parseArray(field.field_type, value.list);
                 },
+                .Struct => {
+                    @field(parsed, field.name) = try self.parseStruct(field.field_type, value.map);
+                },
                 else => @compileError("unimplemented for " ++ @typeName(field.field_type)),
             }
         }
@@ -387,6 +390,26 @@ test "simple map typed" {
     try testing.expectEqual(simple.a, 0);
     try testing.expect(mem.eql(u8, simple.b, "hello there"));
     try testing.expect(mem.eql(u8, simple.c, "wait, what?"));
+}
+
+test "typed nested structs" {
+    const source =
+        \\a:
+        \\  b: hello there
+        \\  c: 'wait, what?'
+    ;
+
+    var yaml = try Yaml.load(testing.allocator, source);
+    defer yaml.deinit();
+
+    const simple = try yaml.parse(struct {
+        a: struct {
+            b: []const u8,
+            c: []const u8,
+        },
+    });
+    try testing.expect(mem.eql(u8, simple.a.b, "hello there"));
+    try testing.expect(mem.eql(u8, simple.a.c, "wait, what?"));
 }
 
 test "multidoc typed not supported yet" {
