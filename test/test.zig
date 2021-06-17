@@ -2,23 +2,19 @@ const std = @import("std");
 const mem = std.mem;
 const testing = std.testing;
 
+const Allocator = mem.Allocator;
 const Yaml = @import("yaml").Yaml;
 
-const allocator = testing.allocator;
+const gpa = testing.allocator;
 
-fn testYaml(
-    file_path: []const u8,
-    comptime T: type,
-    eql: fn (T, T) bool,
-    expected: T,
-) !void {
+fn testYaml(file_path: []const u8, comptime T: type, eql: fn (T, T) bool, expected: T) !void {
     const file = try std.fs.cwd().openFile(file_path, .{});
     defer file.close();
 
-    const source = try file.readToEndAlloc(allocator, std.math.maxInt(u32));
-    defer allocator.free(source);
+    const source = try file.readToEndAlloc(gpa, std.math.maxInt(u32));
+    defer gpa.free(source);
 
-    var parsed = try Yaml.load(allocator, source);
+    var parsed = try Yaml.load(gpa, source);
     defer parsed.deinit();
 
     const result = try parsed.parse(T);
@@ -27,8 +23,8 @@ fn testYaml(
 
 test "simple" {
     const Simple = struct {
-        names: [3][]const u8,
-        numbers: [3]i16,
+        names: []const []const u8,
+        numbers: []const i16,
         nested: struct {
             some: []const u8,
             wick: []const u8,
@@ -59,9 +55,9 @@ test "simple" {
         }
     };
 
-    try testYaml("test/simple.yaml", Simple, Simple.eql, Simple{
-        .names = [_][]const u8{ "John Doe", "MacIntosh", "Jane Austin" },
-        .numbers = [_]i16{ 10, -8, 6 },
+    try testYaml("test/simple.yaml", Simple, Simple.eql, .{
+        .names = &[_][]const u8{ "John Doe", "MacIntosh", "Jane Austin" },
+        .numbers = &[_]i16{ 10, -8, 6 },
         .nested = .{
             .some = "one",
             .wick = "john doe",
