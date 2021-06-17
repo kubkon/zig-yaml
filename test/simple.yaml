@@ -1,7 +1,7 @@
 names: [ John Doe, MacIntosh, Jane Austin ]
 numbers:
   - 10
-  - 8
+  - -8
   - 6
 finally: [ 8.17,
            19.78      , 17 ,

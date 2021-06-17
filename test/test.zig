@@ -28,7 +28,7 @@ fn testYaml(
 test "simple" {
     const Simple = struct {
         names: [3][]const u8,
-        numbers: [3]u16,
+        numbers: [3]i16,
         finally: [4]f16,
 
         pub fn eql(self: @This(), other: @This()) bool {
@@ -54,7 +54,7 @@ test "simple" {
 
     try testYaml("test/simple.yaml", Simple, Simple.eql, Simple{
         .names = [_][]const u8{ "John Doe", "MacIntosh", "Jane Austin" },
-        .numbers = [_]u16{ 10, 8, 6 },
+        .numbers = [_]i16{ 10, -8, 6 },
         .finally = [_]f16{ 8.17, 19.78, 17, 21 },
     });
 }
