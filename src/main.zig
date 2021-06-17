@@ -159,45 +159,37 @@ pub const Yaml = struct {
         if (self.docs.items.len == 0) return error.EmptyYaml;
         if (self.docs.items.len > 1) return error.MultiDocUnsupported;
 
-        switch (@typeInfo(T)) {
-            .Struct => return self.parseStruct(T, self.docs.items[0].map),
-            .Array => return self.parseArray(T, self.docs.items[0].list),
+        const doc = self.docs.items[0];
+        return switch (@typeInfo(T)) {
+            .Struct => self.parseStruct(T, doc.map),
+            .Array => self.parseArray(T, doc.list),
+            .Pointer => self.parsePointer(T, doc),
             .Void => unreachable,
             else => @compileError("unimplemented for " ++ @typeName(T)),
-        }
+        };
     }
 
-    fn parseStruct(self: *Yaml, comptime T: type, map: anytype) Error!T {
+    fn parseStruct(self: *Yaml, comptime T: type, map: Map) Error!T {
         const struct_info = @typeInfo(T).Struct;
         var parsed: T = undefined;
 
         inline for (struct_info.fields) |field| {
             const value = map.get(field.name) orelse return error.StructFieldMissing;
 
-            switch (@typeInfo(field.field_type)) {
-                .Int => {
-                    @field(parsed, field.name) = try math.cast(field.field_type, value.int);
-                },
-                .Float => {
-                    @field(parsed, field.name) = math.lossyCast(field.field_type, value.float);
-                },
-                .Pointer => {
-                    @field(parsed, field.name) = try self.parsePointer(field.field_type, value);
-                },
-                .Array => {
-                    @field(parsed, field.name) = try self.parseArray(field.field_type, value.list);
-                },
-                .Struct => {
-                    @field(parsed, field.name) = try self.parseStruct(field.field_type, value.map);
-                },
+            @field(parsed, field.name) = switch (@typeInfo(field.field_type)) {
+                .Int => try math.cast(field.field_type, value.int),
+                .Float => math.lossyCast(field.field_type, value.float),
+                .Pointer => try self.parsePointer(field.field_type, value),
+                .Array => try self.parseArray(field.field_type, value.list),
+                .Struct => try self.parseStruct(field.field_type, value.map),
                 else => @compileError("unimplemented for " ++ @typeName(field.field_type)),
-            }
+            };
         }
 
         return parsed;
     }
 
-    fn parsePointer(self: *Yaml, comptime T: type, value: anytype) Error!T {
+    fn parsePointer(self: *Yaml, comptime T: type, value: Value) Error!T {
         const ptr_info = @typeInfo(T).Pointer;
         const arena = &self.arena.allocator;
 
@@ -237,28 +229,24 @@ pub const Yaml = struct {
         }
     }
 
-    fn parseArray(self: *Yaml, comptime T: type, list: []Value) Error!T {
+    fn parseArray(self: *Yaml, comptime T: type, list: List) Error!T {
         const array_info = @typeInfo(T).Array;
         if (array_info.len != list.len) return error.ArraySizeMismatch;
 
         var parsed: T = undefined;
-        switch (@typeInfo(array_info.child)) {
-            .Int => {
-                for (list) |value, i| {
+        for (list) |value, i| {
+            switch (@typeInfo(array_info.child)) {
+                .Int => {
                     parsed[i] = try math.cast(array_info.child, value.int);
-                }
-            },
-            .Float => {
-                for (list) |value, i| {
+                },
+                .Float => {
                     parsed[i] = math.lossyCast(array_info.child, value.float);
-                }
-            },
-            .Pointer => {
-                for (list) |value, i| {
+                },
+                .Pointer => {
                     parsed[i] = try self.parsePointer(array_info.child, value);
-                }
-            },
-            else => @compileError("unimplemented for " ++ @typeName(array_info.child)),
+                },
+                else => @compileError("unimplemented for " ++ @typeName(array_info.child)),
+            }
         }
 
         return parsed;
