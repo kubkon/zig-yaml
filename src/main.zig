@@ -4,8 +4,6 @@ const math = std.math;
 const mem = std.mem;
 const testing = std.testing;
 
-pub const log_level: std.log.Level = .debug;
-
 const log = std.log.scoped(.yaml);
 
 const Allocator = mem.Allocator;
