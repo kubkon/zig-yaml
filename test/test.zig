@@ -80,6 +80,10 @@ const LibTbd = struct {
         targets: []const []const u8,
         libraries: []const []const u8,
     },
+    exports: []const struct {
+        targets: []const []const u8,
+        symbols: []const []const u8,
+    },
 
     pub fn eql(self: LibTbd, other: LibTbd) bool {
         if (self.tbd_version != other.tbd_version) return false;
@@ -106,6 +110,24 @@ const LibTbd = struct {
             for (reexport.libraries) |library, j| {
                 const o_library = o_reexport.libraries[j];
                 if (!mem.eql(u8, library, o_library)) return false;
+            }
+        }
+
+        if (self.exports.len != other.exports.len) return false;
+
+        for (self.exports) |exp, i| {
+            const o_exp = other.exports[i];
+            if (exp.targets.len != o_exp.targets.len) return false;
+            if (exp.symbols.len != o_exp.symbols.len) return false;
+
+            for (exp.targets) |target, j| {
+                const o_target = o_exp.targets[j];
+                if (!mem.eql(u8, target, o_target)) return false;
+            }
+
+            for (exp.symbols) |symbol, j| {
+                const o_symbol = o_exp.symbols[j];
+                if (!mem.eql(u8, symbol, o_symbol)) return false;
             }
         }
 
@@ -152,6 +174,32 @@ test "single lib tbd" {
                     "/usr/lib/system/libcache.dylib",       "/usr/lib/system/libcommonCrypto.dylib",
                     "/usr/lib/system/libcompiler_rt.dylib", "/usr/lib/system/libcopyfile.dylib",
                     "/usr/lib/system/libxpc.dylib",
+                },
+            },
+        },
+        .exports = &.{
+            .{
+                .targets = &.{
+                    "x86_64-maccatalyst",
+                    "x86_64-macos",
+                },
+                .symbols = &.{
+                    "R8289209$_close", "R8289209$_fork", "R8289209$_fsync", "R8289209$_getattrlist",
+                    "R8289209$_write",
+                },
+            },
+            .{
+                .targets = &.{
+                    "x86_64-maccatalyst",
+                    "x86_64-macos",
+                    "arm64-macos",
+                    "arm64-maccatalyst",
+                    "arm64e-macos",
+                    "arm64e-maccatalyst",
+                },
+                .symbols = &.{
+                    "___crashreporter_info__",   "_libSystem_atfork_child", "_libSystem_atfork_parent",
+                    "_libSystem_atfork_prepare", "_mach_init_routine",
                 },
             },
         },

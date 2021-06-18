@@ -82,17 +82,19 @@ pub const Node = struct {
             options: std.fmt.FormatOptions,
             writer: anytype,
         ) !void {
-            try std.fmt.format(writer, "Doc {{ ", .{});
             if (self.directive) |id| {
+                try std.fmt.format(writer, "{{ ", .{});
                 const directive = self.base.tree.tokens[id];
                 try std.fmt.format(writer, ".directive = {s}, ", .{
                     self.base.tree.source[directive.start..directive.end],
                 });
             }
             if (self.value) |node| {
-                try std.fmt.format(writer, ".value = {}", .{node});
+                try std.fmt.format(writer, "{}", .{node});
             }
-            return std.fmt.format(writer, " }}", .{});
+            if (self.directive != null) {
+                try std.fmt.format(writer, " }}", .{});
+            }
         }
     };
 
@@ -123,7 +125,7 @@ pub const Node = struct {
             options: std.fmt.FormatOptions,
             writer: anytype,
         ) !void {
-            try std.fmt.format(writer, "Map {{ .values = {{ ", .{});
+            try std.fmt.format(writer, "{{ ", .{});
             for (self.values.items) |entry| {
                 const key = self.base.tree.tokens[entry.key];
                 try std.fmt.format(writer, "{s} => {}, ", .{
@@ -157,11 +159,11 @@ pub const Node = struct {
             options: std.fmt.FormatOptions,
             writer: anytype,
         ) !void {
-            try std.fmt.format(writer, "List {{ .values = [ ", .{});
+            try std.fmt.format(writer, "[ ", .{});
             for (self.values.items) |node| {
                 try std.fmt.format(writer, "{}, ", .{node});
             }
-            return std.fmt.format(writer, "] }}", .{});
+            return std.fmt.format(writer, " ]", .{});
         }
     };
 
@@ -182,7 +184,7 @@ pub const Node = struct {
         ) !void {
             const start = self.base.tree.tokens[self.start.?];
             const end = self.base.tree.tokens[self.end.?];
-            return std.fmt.format(writer, "Value {{ .value = {s} }}", .{
+            return std.fmt.format(writer, "{s}", .{
                 self.base.tree.source[start.start..end.end],
             });
         }
@@ -521,7 +523,6 @@ const Parser = struct {
                         break :value &list_node.base;
                     },
                     .FlowSeqEnd => {
-                        _ = self.eatToken(.NewLine);
                         break;
                     },
                     .Literal, .SingleQuote, .DoubleQuote => {
