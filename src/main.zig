@@ -182,8 +182,8 @@ pub const Value = union(ValueType) {
                     .float => Value{ .float = try std.fmt.parseFloat(f64, raw) },
                     .string => switch (value.escape_mode) {
                         .None => Value{ .string = try arena.dupe(u8, raw) },
-                        .DoubleQuote => Value{ .string = value.string_value.items },
-                        .SingleQuote => Value{ .string = value.string_value.items },
+                        .DoubleQuote => Value{ .string = try arena.dupe(u8, value.string_value.items) },
+                        .SingleQuote => Value{ .string = try arena.dupe(u8, value.string_value.items) },
                     },
                     else => unreachable,
                 };
