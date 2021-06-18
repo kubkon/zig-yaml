@@ -40,6 +40,31 @@ pub const Value = union(ValueType) {
     list: List,
     map: Map,
 
+    pub fn asInt(self: Value) !i64 {
+        if (self != .int) return error.TypeMismatch;
+        return self.int;
+    }
+
+    pub fn asFloat(self: Value) !f64 {
+        if (self != .float) return error.TypeMismatch;
+        return self.float;
+    }
+
+    pub fn asString(self: Value) ![]const u8 {
+        if (self != .string) return error.TypeMismatch;
+        return self.string;
+    }
+
+    pub fn asList(self: Value) !List {
+        if (self != .list) return error.TypeMismatch;
+        return self.list;
+    }
+
+    pub fn asMap(self: Value) !Map {
+        if (self != .map) return error.TypeMismatch;
+        return self.map;
+    }
+
     const StringifyArgs = struct {
         indentation: usize = 0,
         should_inline_first_key: bool = false,
@@ -248,6 +273,7 @@ pub const Yaml = struct {
         TypeMismatch,
         StructFieldMissing,
         ArraySizeMismatch,
+        UntaggedUnion,
         Overflow,
         OutOfMemory,
     };
@@ -289,15 +315,38 @@ pub const Yaml = struct {
 
     fn parseValue(self: *Yaml, comptime T: type, value: Value) Error!T {
         return switch (@typeInfo(T)) {
-            .Int => try math.cast(T, value.int),
-            .Float => math.lossyCast(T, value.float),
-            .Struct => self.parseStruct(T, value.map),
-            .Array => self.parseArray(T, value.list),
-            .Pointer => self.parsePointer(T, value),
-            .Void => return error.TypeMismatch,
+            .Int => math.cast(T, try value.asInt()),
+            .Float => math.lossyCast(T, try value.asFloat()),
+            .Struct => self.parseStruct(T, try value.asMap()),
+            .Union => self.parseUnion(T, value),
+            .Array => self.parseArray(T, try value.asList()),
+            .Pointer => {
+                if (value.asList()) |list| {
+                    return self.parsePointer(T, .{ .list = list });
+                } else |_| {
+                    return self.parsePointer(T, .{ .string = try value.asString() });
+                }
+            },
+            .Void => error.TypeMismatch,
             .Optional => unreachable,
-            else => return error.Unimplemented,
+            else => error.Unimplemented,
         };
+    }
+
+    fn parseUnion(self: *Yaml, comptime T: type, value: Value) Error!T {
+        const union_info = @typeInfo(T).Union;
+
+        if (union_info.tag_type) |_| {
+            inline for (union_info.fields) |field| {
+                if (self.parseValue(field.field_type, value)) |u_value| {
+                    return @unionInit(T, field.name, u_value);
+                } else |err| {
+                    if (@as(@TypeOf(err) || error{TypeMismatch}, err) != error.TypeMismatch) return err;
+                }
+            }
+        } else return error.UntaggedUnion;
+
+        unreachable;
     }
 
     fn parseOptional(self: *Yaml, comptime T: type, value: ?Value) Error!T {
@@ -338,7 +387,7 @@ pub const Yaml = struct {
             .Slice => {
                 const child_info = @typeInfo(ptr_info.child);
                 if (child_info == .Int and child_info.Int.bits == 8) {
-                    return value.string;
+                    return value.asString();
                 }
 
                 var parsed = try arena.alloc(ptr_info.child, value.list.len);

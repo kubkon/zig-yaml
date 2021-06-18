@@ -75,7 +75,10 @@ const LibTbd = struct {
         value: []const u8,
     },
     install_name: []const u8,
-    current_version: []const u8,
+    current_version: union(enum) {
+        string: []const u8,
+        int: usize,
+    },
     reexported_libraries: ?[]const struct {
         targets: []const []const u8,
         libraries: []const []const u8,
@@ -98,7 +101,17 @@ const LibTbd = struct {
         }
 
         if (!mem.eql(u8, self.install_name, other.install_name)) return false;
-        if (!mem.eql(u8, self.current_version, other.current_version)) return false;
+
+        switch (self.current_version) {
+            .string => |string| {
+                if (other.current_version != .string) return false;
+                if (!mem.eql(u8, string, other.current_version.string)) return false;
+            },
+            .int => |int| {
+                if (other.current_version != .int) return false;
+                if (int != other.current_version.int) return false;
+            },
+        }
 
         if (self.reexported_libraries) |reexported_libraries| {
             const o_reexported_libraries = other.reexported_libraries orelse return false;
@@ -186,7 +199,7 @@ test "single lib tbd" {
             .{ .target = "arm64e-maccatalyst", .value = "A17E8744-051E-356E-8619-66F2A6E89AD4" },
         },
         .install_name = "/usr/lib/libSystem.B.dylib",
-        .current_version = "1292.60.1",
+        .current_version = .{ .string = "1292.60.1" },
         .reexported_libraries = &.{
             .{
                 .targets = &.{
@@ -248,7 +261,7 @@ test "multi lib tbd" {
                 .{ .target = "x86_64-macos", .value = "F86CC732-D5E4-30B5-AA7D-167DF5EC2708" },
             },
             .install_name = "/usr/lib/libSystem.B.dylib",
-            .current_version = "1292.60.1",
+            .current_version = .{ .string = "1292.60.1" },
             .reexported_libraries = &.{
                 .{
                     .targets = &.{"x86_64-macos"},
@@ -274,7 +287,7 @@ test "multi lib tbd" {
                 .{ .target = "x86_64-macos", .value = "2F7F7303-DB23-359E-85CD-8B2F93223E2A" },
             },
             .install_name = "/usr/lib/system/libcache.dylib",
-            .current_version = "8A.3.1",
+            .current_version = .{ .int = 83 },
             .parent_umbrella = &.{
                 .{
                     .targets = &.{"x86_64-macos"},

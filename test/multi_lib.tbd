@@ -21,7 +21,7 @@ uuids:
   - target:          x86_64-macos
     value:           2F7F7303-DB23-359E-85CD-8B2F93223E2A
 install-name:    '/usr/lib/system/libcache.dylib'
-current-version: 8A.3.1
+current-version: 83
 parent-umbrella:
   - targets:         [ x86_64-macos ]
     umbrella:        System
