@@ -76,9 +76,17 @@ const LibTbd = struct {
     },
     install_name: []const u8,
     current_version: []const u8,
-    reexported_libraries: []const struct {
+    reexported_libraries: ?[]const struct {
         targets: []const []const u8,
         libraries: []const []const u8,
+    },
+    parent_umbrella: ?[]const struct {
+        targets: []const []const u8,
+        umbrella: []const u8,
+    },
+    exports: []const struct {
+        targets: []const []const u8,
+        symbols: []const []const u8,
     },
 
     pub fn eql(self: LibTbd, other: LibTbd) bool {
@@ -91,21 +99,62 @@ const LibTbd = struct {
 
         if (!mem.eql(u8, self.install_name, other.install_name)) return false;
         if (!mem.eql(u8, self.current_version, other.current_version)) return false;
-        if (self.reexported_libraries.len != other.reexported_libraries.len) return false;
 
-        for (self.reexported_libraries) |reexport, i| {
-            const o_reexport = other.reexported_libraries[i];
-            if (reexport.targets.len != o_reexport.targets.len) return false;
-            if (reexport.libraries.len != o_reexport.libraries.len) return false;
+        if (self.reexported_libraries) |reexported_libraries| {
+            const o_reexported_libraries = other.reexported_libraries orelse return false;
 
-            for (reexport.targets) |target, j| {
-                const o_target = o_reexport.targets[j];
+            if (reexported_libraries.len != o_reexported_libraries.len) return false;
+
+            for (reexported_libraries) |reexport, i| {
+                const o_reexport = o_reexported_libraries[i];
+                if (reexport.targets.len != o_reexport.targets.len) return false;
+                if (reexport.libraries.len != o_reexport.libraries.len) return false;
+
+                for (reexport.targets) |target, j| {
+                    const o_target = o_reexport.targets[j];
+                    if (!mem.eql(u8, target, o_target)) return false;
+                }
+
+                for (reexport.libraries) |library, j| {
+                    const o_library = o_reexport.libraries[j];
+                    if (!mem.eql(u8, library, o_library)) return false;
+                }
+            }
+        }
+
+        if (self.parent_umbrella) |parent_umbrella| {
+            const o_parent_umbrella = other.parent_umbrella orelse return false;
+
+            if (parent_umbrella.len != o_parent_umbrella.len) return false;
+
+            for (parent_umbrella) |pumbrella, i| {
+                const o_pumbrella = o_parent_umbrella[i];
+                if (pumbrella.targets.len != o_pumbrella.targets.len) return false;
+
+                for (pumbrella.targets) |target, j| {
+                    const o_target = o_pumbrella.targets[j];
+                    if (!mem.eql(u8, target, o_target)) return false;
+                }
+
+                if (!mem.eql(u8, pumbrella.umbrella, o_pumbrella.umbrella)) return false;
+            }
+        }
+
+        if (self.exports.len != other.exports.len) return false;
+
+        for (self.exports) |exp, i| {
+            const o_exp = other.exports[i];
+            if (exp.targets.len != o_exp.targets.len) return false;
+            if (exp.symbols.len != o_exp.symbols.len) return false;
+
+            for (exp.targets) |target, j| {
+                const o_target = o_exp.targets[j];
                 if (!mem.eql(u8, target, o_target)) return false;
             }
 
-            for (reexport.libraries) |library, j| {
-                const o_library = o_reexport.libraries[j];
-                if (!mem.eql(u8, library, o_library)) return false;
+            for (exp.symbols) |symbol, j| {
+                const o_symbol = o_exp.symbols[j];
+                if (!mem.eql(u8, symbol, o_symbol)) return false;
             }
         }
 
@@ -155,6 +204,94 @@ test "single lib tbd" {
                 },
             },
         },
+        .exports = &.{
+            .{
+                .targets = &.{
+                    "x86_64-maccatalyst",
+                    "x86_64-macos",
+                },
+                .symbols = &.{
+                    "R8289209$_close", "R8289209$_fork", "R8289209$_fsync", "R8289209$_getattrlist",
+                    "R8289209$_write",
+                },
+            },
+            .{
+                .targets = &.{
+                    "x86_64-maccatalyst",
+                    "x86_64-macos",
+                    "arm64e-maccatalyst",
+                    "arm64e-macos",
+                    "arm64-macos",
+                    "arm64-maccatalyst",
+                },
+                .symbols = &.{
+                    "___crashreporter_info__",   "_libSystem_atfork_child", "_libSystem_atfork_parent",
+                    "_libSystem_atfork_prepare", "_mach_init_routine",
+                },
+            },
+        },
+        .parent_umbrella = null,
     };
     try testing.expect(result.eql(expected));
+}
+
+test "multi lib tbd" {
+    var parsed = try loadFromFile("test/multi_lib.tbd");
+    defer parsed.deinit();
+
+    const result = try parsed.parse([]LibTbd);
+    const expected = &[_]LibTbd{
+        .{
+            .tbd_version = 4,
+            .targets = &[_][]const u8{"x86_64-macos"},
+            .uuids = &.{
+                .{ .target = "x86_64-macos", .value = "F86CC732-D5E4-30B5-AA7D-167DF5EC2708" },
+            },
+            .install_name = "/usr/lib/libSystem.B.dylib",
+            .current_version = "1292.60.1",
+            .reexported_libraries = &.{
+                .{
+                    .targets = &.{"x86_64-macos"},
+                    .libraries = &.{"/usr/lib/system/libcache.dylib"},
+                },
+            },
+            .exports = &.{
+                .{
+                    .targets = &.{"x86_64-macos"},
+                    .symbols = &.{ "R8289209$_close", "R8289209$_fork" },
+                },
+                .{
+                    .targets = &.{"x86_64-macos"},
+                    .symbols = &.{ "___crashreporter_info__", "_libSystem_atfork_child" },
+                },
+            },
+            .parent_umbrella = null,
+        },
+        .{
+            .tbd_version = 4,
+            .targets = &[_][]const u8{"x86_64-macos"},
+            .uuids = &.{
+                .{ .target = "x86_64-macos", .value = "2F7F7303-DB23-359E-85CD-8B2F93223E2A" },
+            },
+            .install_name = "/usr/lib/system/libcache.dylib",
+            .current_version = "8A.3.1",
+            .parent_umbrella = &.{
+                .{
+                    .targets = &.{"x86_64-macos"},
+                    .umbrella = "System",
+                },
+            },
+            .exports = &.{
+                .{
+                    .targets = &.{"x86_64-macos"},
+                    .symbols = &.{ "_cache_create", "_cache_destroy" },
+                },
+            },
+            .reexported_libraries = null,
+        },
+    };
+
+    for (result) |lib, i| {
+        try testing.expect(lib.eql(expected[i]));
+    }
 }

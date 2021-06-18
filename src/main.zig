@@ -41,6 +41,90 @@ pub const Value = union(ValueType) {
     list: List,
     map: Map,
 
+    const StringifyArgs = struct {
+        indentation: usize = 0,
+        should_inline_first_key: bool = false,
+    };
+
+    pub const StringifyError = std.os.WriteError;
+
+    pub fn stringify(self: Value, writer: anytype, args: StringifyArgs) StringifyError!void {
+        switch (self) {
+            .empty => return,
+            .int => |int| return writer.print("{}", .{int}),
+            .float => |float| return writer.print("{d}", .{float}),
+            .string => |string| return writer.print("{s}", .{string}),
+            .list => |list| {
+                const len = list.len;
+                if (len == 0) return;
+
+                const first = list[0];
+                if (first.is_compound()) {
+                    for (list) |elem, i| {
+                        try writer.writeByteNTimes(' ', args.indentation);
+                        try writer.writeAll("- ");
+                        try elem.stringify(writer, .{
+                            .indentation = args.indentation + 2,
+                            .should_inline_first_key = true,
+                        });
+                        if (i < len - 1) {
+                            try writer.writeByte('\n');
+                        }
+                    }
+                    return;
+                }
+
+                try writer.writeAll("[ ");
+                for (list) |elem, i| {
+                    try elem.stringify(writer, args);
+                    if (i < len - 1) {
+                        try writer.writeAll(", ");
+                    }
+                }
+                try writer.writeAll(" ]");
+            },
+            .map => |map| {
+                const keys = map.keys();
+                const len = keys.len;
+                if (len == 0) return;
+
+                for (keys) |key, i| {
+                    if (!args.should_inline_first_key or i != 0) {
+                        try writer.writeByteNTimes(' ', args.indentation);
+                    }
+                    try writer.print("{s}: ", .{key});
+
+                    const value = map.get(key) orelse unreachable;
+                    const should_inline = blk: {
+                        if (!value.is_compound()) break :blk true;
+                        if (value == .list and value.list.len > 0 and !value.list[0].is_compound()) break :blk true;
+                        break :blk false;
+                    };
+
+                    if (should_inline) {
+                        try value.stringify(writer, args);
+                    } else {
+                        try writer.writeByte('\n');
+                        try value.stringify(writer, .{
+                            .indentation = args.indentation + 4,
+                        });
+                    }
+
+                    if (i < len - 1) {
+                        try writer.writeByte('\n');
+                    }
+                }
+            },
+        }
+    }
+
+    fn is_compound(self: Value) bool {
+        return switch (self) {
+            .list, .map => true,
+            else => false,
+        };
+    }
+
     fn fromNode(arena: *Allocator, tree: *const Tree, node: *const Node, type_hint: ?ValueType) YamlError!Value {
         if (node.cast(Node.Doc)) |doc| {
             const inner = doc.value orelse {
@@ -131,6 +215,18 @@ pub const Yaml = struct {
         self.arena.deinit();
     }
 
+    pub fn stringify(self: Yaml, writer: anytype) !void {
+        for (self.docs.items) |doc| {
+            // if (doc.directive) |directive| {
+            //     try writer.print("--- !{s}\n", .{directive});
+            // }
+            try doc.stringify(writer, .{});
+            // if (doc.directive != null) {
+            //     try writer.writeAll("...\n");
+            // }
+        }
+    }
+
     pub fn load(allocator: *Allocator, source: []const u8) !Yaml {
         var arena = ArenaAllocator.init(allocator);
 
@@ -153,8 +249,8 @@ pub const Yaml = struct {
     }
 
     pub const Error = error{
-        EmptyYaml,
-        MultiDocUnsupported,
+        Unimplemented,
+        TypeMismatch,
         StructFieldMissing,
         ArraySizeMismatch,
         Overflow,
@@ -162,17 +258,57 @@ pub const Yaml = struct {
     };
 
     pub fn parse(self: *Yaml, comptime T: type) Error!T {
-        if (self.docs.items.len == 0) return error.EmptyYaml;
-        if (self.docs.items.len > 1) return error.MultiDocUnsupported;
+        if (self.docs.items.len == 0) {
+            if (@typeInfo(T) == .Void) return {};
+            return error.TypeMismatch;
+        }
 
-        const doc = self.docs.items[0];
+        if (self.docs.items.len == 1) {
+            return self.parseValue(T, self.docs.items[0]);
+        }
+
+        switch (@typeInfo(T)) {
+            .Array => |info| {
+                var parsed: T = undefined;
+                for (self.docs.items) |doc, i| {
+                    parsed[i] = try self.parseValue(info.child, doc);
+                }
+                return parsed;
+            },
+            .Pointer => |info| {
+                switch (info.size) {
+                    .Slice => {
+                        var parsed = try self.arena.allocator.alloc(info.child, self.docs.items.len);
+                        for (self.docs.items) |doc, i| {
+                            parsed[i] = try self.parseValue(info.child, doc);
+                        }
+                        return parsed;
+                    },
+                    else => return error.TypeMismatch,
+                }
+            },
+            .Union => return error.Unimplemented,
+            else => return error.TypeMismatch,
+        }
+    }
+
+    fn parseValue(self: *Yaml, comptime T: type, value: Value) Error!T {
         return switch (@typeInfo(T)) {
-            .Struct => self.parseStruct(T, doc.map),
-            .Array => self.parseArray(T, doc.list),
-            .Pointer => self.parsePointer(T, doc),
-            .Void => unreachable,
-            else => @compileError("unimplemented for " ++ @typeName(T)),
+            .Int => try math.cast(T, value.int),
+            .Float => math.lossyCast(T, value.float),
+            .Struct => self.parseStruct(T, value.map),
+            .Array => self.parseArray(T, value.list),
+            .Pointer => self.parsePointer(T, value),
+            .Void => return error.TypeMismatch,
+            .Optional => unreachable,
+            else => return error.Unimplemented,
         };
+    }
+
+    fn parseOptional(self: *Yaml, comptime T: type, value: ?Value) Error!T {
+        const unwrapped = value orelse return null;
+        const opt_info = @typeInfo(T).Optional;
+        return @as(T, try self.parseValue(opt_info.child, unwrapped));
     }
 
     fn parseStruct(self: *Yaml, comptime T: type, map: Map) Error!T {
@@ -180,19 +316,20 @@ pub const Yaml = struct {
         var parsed: T = undefined;
 
         inline for (struct_info.fields) |field| {
-            const value = map.get(field.name) orelse blk: {
+            const value: ?Value = map.get(field.name) orelse blk: {
                 const field_name = try mem.replaceOwned(u8, &self.arena.allocator, field.name, "_", "-");
-                break :blk map.get(field_name) orelse return error.StructFieldMissing;
+                break :blk map.get(field_name);
             };
 
-            @field(parsed, field.name) = switch (@typeInfo(field.field_type)) {
-                .Int => try math.cast(field.field_type, value.int),
-                .Float => math.lossyCast(field.field_type, value.float),
-                .Pointer => try self.parsePointer(field.field_type, value),
-                .Array => try self.parseArray(field.field_type, value.list),
-                .Struct => try self.parseStruct(field.field_type, value.map),
-                else => @compileError("unimplemented for " ++ @typeName(field.field_type)),
-            };
+            if (@typeInfo(field.field_type) == .Optional) {
+                @field(parsed, field.name) = try self.parseOptional(field.field_type, value);
+                continue;
+            }
+
+            @field(parsed, field.name) = try self.parseValue(
+                field.field_type,
+                value orelse return error.StructFieldMissing,
+            );
         }
 
         return parsed;
@@ -203,7 +340,6 @@ pub const Yaml = struct {
         const arena = &self.arena.allocator;
 
         switch (ptr_info.size) {
-            .One => @compileError("unimplemented for pointer to " ++ @typeName(ptr_info.child)),
             .Slice => {
                 const child_info = @typeInfo(ptr_info.child);
                 if (child_info == .Int and child_info.Int.bits == 8) {
@@ -212,18 +348,11 @@ pub const Yaml = struct {
 
                 var parsed = try arena.alloc(ptr_info.child, value.list.len);
                 for (value.list) |elem, i| {
-                    parsed[i] = switch (child_info) {
-                        .Int => try math.cast(ptr_info.child, elem.int),
-                        .Float => math.lossyCast(ptr_info.child, elem.float),
-                        .Pointer => try self.parsePointer(ptr_info.child, elem),
-                        .Struct => try self.parseStruct(ptr_info.child, elem.map),
-                        .Array => try self.parseArray(ptr_info.child, elem.list),
-                        else => @compileError("unimplemented for " ++ @typeName(ptr_info.child)),
-                    };
+                    parsed[i] = try self.parseValue(ptr_info.child, elem);
                 }
                 return parsed;
             },
-            else => @compileError("unimplemented for pointer to many " ++ @typeName(ptr_info.child)),
+            else => return error.Unimplemented,
         }
     }
 
@@ -233,14 +362,7 @@ pub const Yaml = struct {
 
         var parsed: T = undefined;
         for (list) |elem, i| {
-            parsed[i] = switch (@typeInfo(array_info.child)) {
-                .Int => try math.cast(array_info.child, elem.int),
-                .Float => math.lossyCast(array_info.child, elem.float),
-                .Pointer => try self.parsePointer(array_info.child, elem),
-                .Struct => try self.parseStruct(array_info.child, elem.map),
-                .Array => try self.parseArray(array_info.child, elem.list),
-                else => @compileError("unimplemented for " ++ @typeName(array_info.child)),
-            };
+            parsed[i] = try self.parseValue(array_info.child, elem);
         }
 
         return parsed;
@@ -418,28 +540,95 @@ test "double quoted string" {
     ));
 }
 
-test "multidoc typed not supported yet" {
+test "multidoc typed as a slice of structs" {
     const source =
         \\---
         \\a: 0
-        \\...
         \\---
-        \\- 0
+        \\a: 1
         \\...
     ;
 
     var yaml = try Yaml.load(testing.allocator, source);
     defer yaml.deinit();
 
-    try testing.expectError(Yaml.Error.MultiDocUnsupported, yaml.parse(struct { a: usize }));
-    try testing.expectError(Yaml.Error.MultiDocUnsupported, yaml.parse([1]usize));
+    {
+        const result = try yaml.parse([2]struct { a: usize });
+        try testing.expectEqual(result.len, 2);
+        try testing.expectEqual(result[0].a, 0);
+        try testing.expectEqual(result[1].a, 1);
+    }
+
+    {
+        const result = try yaml.parse([]struct { a: usize });
+        try testing.expectEqual(result.len, 2);
+        try testing.expectEqual(result[0].a, 0);
+        try testing.expectEqual(result[1].a, 1);
+    }
 }
 
-test "empty yaml typed not supported" {
+test "multidoc typed as a struct is an error" {
+    const source =
+        \\---
+        \\a: 0
+        \\---
+        \\b: 1
+        \\...
+    ;
+
+    var yaml = try Yaml.load(testing.allocator, source);
+    defer yaml.deinit();
+
+    try testing.expectError(Yaml.Error.TypeMismatch, yaml.parse(struct { a: usize }));
+    try testing.expectError(Yaml.Error.TypeMismatch, yaml.parse(struct { b: usize }));
+    try testing.expectError(Yaml.Error.TypeMismatch, yaml.parse(struct { a: usize, b: usize }));
+}
+
+test "multidoc typed as a slice of structs with optionals" {
+    const source =
+        \\---
+        \\a: 0
+        \\c: 1.0
+        \\---
+        \\a: 1
+        \\b: different field
+        \\...
+    ;
+
+    var yaml = try Yaml.load(testing.allocator, source);
+    defer yaml.deinit();
+
+    const result = try yaml.parse([]struct { a: usize, b: ?[]const u8, c: ?f16 });
+    try testing.expectEqual(result.len, 2);
+
+    try testing.expectEqual(result[0].a, 0);
+    try testing.expect(result[0].b == null);
+    try testing.expect(result[0].c != null);
+    try testing.expectEqual(result[0].c.?, 1.0);
+
+    try testing.expectEqual(result[1].a, 1);
+    try testing.expect(result[1].b != null);
+    try testing.expect(mem.eql(u8, result[1].b.?, "different field"));
+    try testing.expect(result[1].c == null);
+}
+
+test "empty yaml can be represented as void" {
     const source = "";
     var yaml = try Yaml.load(testing.allocator, source);
     defer yaml.deinit();
-    try testing.expectError(Yaml.Error.EmptyYaml, yaml.parse(void));
+    const result = try yaml.parse(void);
+    try testing.expect(@TypeOf(result) == void);
+}
+
+test "nonempty yaml cannot be represented as void" {
+    const source =
+        \\a: b
+    ;
+
+    var yaml = try Yaml.load(testing.allocator, source);
+    defer yaml.deinit();
+
+    try testing.expectError(Yaml.Error.TypeMismatch, yaml.parse(void));
 }
 
 test "typed array size mismatch" {
