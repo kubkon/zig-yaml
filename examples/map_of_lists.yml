@@ -2,3 +2,8 @@ map:
 - 0
 - 1
 - 2
+another:
+  - key: value
+  - keys: [ a, b,
+            c, d ]
+final: what is that?

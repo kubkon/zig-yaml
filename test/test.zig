@@ -192,10 +192,10 @@ test "single lib tbd" {
                 .targets = &.{
                     "x86_64-maccatalyst",
                     "x86_64-macos",
+                    "arm64e-maccatalyst",
+                    "arm64e-macos",
                     "arm64-macos",
                     "arm64-maccatalyst",
-                    "arm64e-macos",
-                    "arm64e-maccatalyst",
                 },
                 .symbols = &.{
                     "___crashreporter_info__",   "_libSystem_atfork_child", "_libSystem_atfork_parent",

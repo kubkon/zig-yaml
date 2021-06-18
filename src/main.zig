@@ -40,6 +40,90 @@ pub const Value = union(ValueType) {
     list: List,
     map: Map,
 
+    const StringifyArgs = struct {
+        indentation: usize = 0,
+        should_inline_first_key: bool = false,
+    };
+
+    pub const StringifyError = std.os.WriteError;
+
+    pub fn stringify(self: Value, writer: anytype, args: StringifyArgs) StringifyError!void {
+        switch (self) {
+            .empty => return,
+            .int => |int| return writer.print("{}", .{int}),
+            .float => |float| return writer.print("{d}", .{float}),
+            .string => |string| return writer.print("{s}", .{string}),
+            .list => |list| {
+                const len = list.len;
+                if (len == 0) return;
+
+                const first = list[0];
+                if (first.is_compound()) {
+                    for (list) |elem, i| {
+                        try writer.writeByteNTimes(' ', args.indentation);
+                        try writer.writeAll("- ");
+                        try elem.stringify(writer, .{
+                            .indentation = args.indentation + 2,
+                            .should_inline_first_key = true,
+                        });
+                        if (i < len - 1) {
+                            try writer.writeByte('\n');
+                        }
+                    }
+                    return;
+                }
+
+                try writer.writeAll("[ ");
+                for (list) |elem, i| {
+                    try elem.stringify(writer, args);
+                    if (i < len - 1) {
+                        try writer.writeAll(", ");
+                    }
+                }
+                try writer.writeAll(" ]");
+            },
+            .map => |map| {
+                const keys = map.keys();
+                const len = keys.len;
+                if (len == 0) return;
+
+                for (keys) |key, i| {
+                    if (!args.should_inline_first_key or i != 0) {
+                        try writer.writeByteNTimes(' ', args.indentation);
+                    }
+                    try writer.print("{s}: ", .{key});
+
+                    const value = map.get(key) orelse unreachable;
+                    const should_inline = blk: {
+                        if (!value.is_compound()) break :blk true;
+                        if (value == .list and value.list.len > 0 and !value.list[0].is_compound()) break :blk true;
+                        break :blk false;
+                    };
+
+                    if (should_inline) {
+                        try value.stringify(writer, args);
+                    } else {
+                        try writer.writeByte('\n');
+                        try value.stringify(writer, .{
+                            .indentation = args.indentation + 4,
+                        });
+                    }
+
+                    if (i < len - 1) {
+                        try writer.writeByte('\n');
+                    }
+                }
+            },
+        }
+    }
+
+    fn is_compound(self: Value) bool {
+        return switch (self) {
+            .list, .map => true,
+            else => false,
+        };
+    }
+
     fn fromNode(arena: *Allocator, tree: *const Tree, node: *const Node, type_hint: ?ValueType) YamlError!Value {
         if (node.cast(Node.Doc)) |doc| {
             const inner = doc.value orelse {
@@ -124,6 +208,18 @@ pub const Yaml = struct {
 
     pub fn deinit(self: *Yaml) void {
         self.arena.deinit();
+    }
+
+    pub fn stringify(self: Yaml, writer: anytype) !void {
+        for (self.docs.items) |doc| {
+            // if (doc.directive) |directive| {
+            //     try writer.print("--- !{s}\n", .{directive});
+            // }
+            try doc.stringify(writer, .{});
+            // if (doc.directive != null) {
+            //     try writer.writeAll("...\n");
+            // }
+        }
     }
 
     pub fn load(allocator: *Allocator, source: []const u8) !Yaml {
