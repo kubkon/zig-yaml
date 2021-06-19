@@ -586,19 +586,12 @@ const Parser = struct {
                             break :parse;
                         },
                         .NewLine => return error.UnexpectedToken,
+                        .EscapeSeq => {
+                            try node.string_value.append(self.tree.source[tok.start + 1]);
+                        },
                         else => {
-                            var i: usize = tok.start;
-                            while (i < tok.end) : (i += 1) {
-                                var c = self.tree.source[i];
-                                switch (c) {
-                                    '\'' => {
-                                        try node.string_value.append(c);
-                                        i += 1;
-                                    },
-                                    else => {
-                                        try node.string_value.append(c);
-                                    },
-                                }
+                            for (self.tree.source[tok.start..tok.end]) |c| {
+                                try node.string_value.append(c);
                             }
                         },
                     }
@@ -617,32 +610,23 @@ const Parser = struct {
                             break :parse;
                         },
                         .NewLine => return error.UnexpectedToken,
+                        .EscapeSeq => {
+                            switch (self.tree.source[tok.start + 1]) {
+                                'n' => {
+                                    try node.string_value.append('\n');
+                                },
+                                't' => {
+                                    try node.string_value.append('\t');
+                                },
+                                '"' => {
+                                    try node.string_value.append('"');
+                                },
+                                else => {},
+                            }
+                        },
                         else => {
-                            var i: usize = tok.start;
-                            while (i < tok.end) : (i += 1) {
-                                var c = self.tree.source[i];
-                                switch (c) {
-                                    '\\' => {
-                                        if (i < tok.end) {
-                                            switch (self.tree.source[i + 1]) {
-                                                'n' => {
-                                                    try node.string_value.append('\n');
-                                                },
-                                                't' => {
-                                                    try node.string_value.append('\t');
-                                                },
-                                                '"' => {
-                                                    try node.string_value.append('"');
-                                                },
-                                                else => {},
-                                            }
-                                        }
-                                        i += 1;
-                                    },
-                                    else => {
-                                        try node.string_value.append(c);
-                                    },
-                                }
+                            for (self.tree.source[tok.start..tok.end]) |c| {
+                                try node.string_value.append(c);
                             }
                         },
                     }

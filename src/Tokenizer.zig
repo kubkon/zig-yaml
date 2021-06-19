@@ -6,12 +6,12 @@ const testing = std.testing;
 
 buffer: []const u8,
 index: usize = 0,
-literal_type: LiteralType = .None,
+string_type: StringType = .Unquoted,
 
-const LiteralType = enum {
-    None,
-    SingleQuote,
-    DoubleQuote,
+const StringType = enum {
+    Unquoted,
+    SingleQuoted,
+    DoubleQuoted,
 };
 
 pub const Token = struct {
@@ -44,6 +44,7 @@ pub const Token = struct {
         Tag, // !
         SingleQuote, // '
         DoubleQuote, // "
+        EscapeSeq, // '' for single quoted strings, starts with \ for double quoted strings
 
         Literal,
     };
@@ -98,7 +99,7 @@ pub fn next(self: *Tokenizer) Token {
         Tab: usize,
         Hyphen: usize,
         Dot: usize,
-        SingleQuote,
+        SingleQuoteOrEscape,
         Literal,
         EscapeSeq,
     } = .Start;
@@ -153,14 +154,26 @@ pub fn next(self: *Tokenizer) Token {
                     break;
                 },
                 '\'' => {
-                    result.id = .SingleQuote;
-                    self.literal_type = if (self.literal_type == .SingleQuote) .None else .SingleQuote;
-                    self.index += 1;
-                    break;
+                    switch (self.string_type) {
+                        .Unquoted => {
+                            result.id = .SingleQuote;
+                            self.string_type = if (self.string_type == .SingleQuoted) .Unquoted else .SingleQuoted;
+                            self.index += 1;
+                            break;
+                        },
+                        .SingleQuoted => {
+                            state = .SingleQuoteOrEscape;
+                        },
+                        .DoubleQuoted => {
+                            result.id = .SingleQuote;
+                            self.index += 1;
+                            break;
+                        },
+                    }
                 },
                 '"' => {
                     result.id = .DoubleQuote;
-                    self.literal_type = if (self.literal_type == .DoubleQuote) .None else .DoubleQuote;
+                    self.string_type = if (self.string_type == .DoubleQuoted) .Unquoted else .DoubleQuoted;
                     self.index += 1;
                     break;
                 },
@@ -190,7 +203,11 @@ pub fn next(self: *Tokenizer) Token {
                     break;
                 },
                 '\\' => {
-                    state = .EscapeSeq;
+                    if (self.string_type == .DoubleQuoted) {
+                        state = .EscapeSeq;
+                    } else {
+                        state = .Literal;
+                    }
                 },
                 else => {
                     state = .Literal;
@@ -257,28 +274,27 @@ pub fn next(self: *Tokenizer) Token {
                     state = .Literal;
                 },
             },
-            .SingleQuote => switch (c) {
+            .SingleQuoteOrEscape => switch (c) {
                 '\'' => {
-                    state = .Literal;
+                    result.id = .EscapeSeq;
+                    self.index += 1;
+                    break;
                 },
-                else => { // This was not an escaped single quote. Go back for the literal.
-                    self.index -= 1;
-                    result.id = .Literal;
+                else => {
+                    self.string_type = .Unquoted;
+                    result.id = .SingleQuote;
                     break;
                 },
             },
             .Literal => switch (c) {
-                '\'' => {
-                    if (self.literal_type == .SingleQuote) {
-                        state = .SingleQuote;
-                    }
-                },
                 '\\' => {
-                    if (self.literal_type == .DoubleQuote) {
-                        state = .EscapeSeq;
+                    result.id = .Literal;
+                    if (self.string_type == .DoubleQuoted) {
+                        // escape sequence
+                        break;
                     }
                 },
-                '\r', '\n', ' ', '"', ',', ':', ']', '}' => {
+                '\r', '\n', ' ', '\'', '"', ',', ':', ']', '}' => {
                     result.id = .Literal;
                     break;
                 },
@@ -287,7 +303,10 @@ pub fn next(self: *Tokenizer) Token {
                 },
             },
             .EscapeSeq => {
-                state = .Literal;
+                // Only support single character escape codes for now...
+                result.id = .EscapeSeq;
+                self.index += 1;
+                break;
             },
         }
     }
@@ -297,10 +316,8 @@ pub fn next(self: *Tokenizer) Token {
             .Literal => {
                 result.id = .Literal;
             },
-            .SingleQuote => {
-                // We are at the Eof while checking for an escaped single quote. It wasn't, so go back for the literal.
-                result.id = .Literal;
-                self.index -= 1;
+            .SingleQuoteOrEscape => {
+                result.id = .SingleQuote;
             },
             else => {},
         }
@@ -485,33 +502,38 @@ test "part of tdb" {
     });
 }
 
-test "simple map typed" {
+test "escape sequences" {
     try testExpected(
-        \\a: 0
-        \\b: hello there
-        \\c: 'wait, what?'
+        \\a: 'here''s an apostrophe'
+        \\b: "a newline\nand a\ttab"
     , &[_]Token.Id{
         .Literal,
         .MapValueInd,
         .Space,
+        .SingleQuote,
         .Literal,
+        .EscapeSeq,
+        .Literal,
+        .Space,
+        .Literal,
+        .Space,
+        .Literal,
+        .SingleQuote,
         .NewLine,
         .Literal,
         .MapValueInd,
         .Space,
+        .DoubleQuote,
         .Literal,
         .Space,
         .Literal,
-        .NewLine,
+        .EscapeSeq,
         .Literal,
-        .MapValueInd,
-        .Space,
-        .SingleQuote,
-        .Literal,
-        .Comma,
         .Space,
         .Literal,
-        .SingleQuote,
+        .EscapeSeq,
+        .Literal,
+        .DoubleQuote,
         .Eof,
     });
 }
