@@ -274,6 +274,7 @@ pub const Yaml = struct {
         StructFieldMissing,
         ArraySizeMismatch,
         UntaggedUnion,
+        UnionTagMissing,
         Overflow,
         OutOfMemory,
     };
@@ -346,7 +347,7 @@ pub const Yaml = struct {
             }
         } else return error.UntaggedUnion;
 
-        unreachable;
+        return error.UnionTagMissing;
     }
 
     fn parseOptional(self: *Yaml, comptime T: type, value: ?Value) Error!T {
