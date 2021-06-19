@@ -645,6 +645,12 @@ const Parser = struct {
                         if (self.token_it.peek()) |peek| {
                             if (peek.id != .Literal) {
                                 node.end = trailing;
+                                const start_token = self.tree.tokens[node.start.?];
+                                const end_token = self.tree.tokens[node.end.?];
+                                const raw = self.tree.source[start_token.start..end_token.end];
+                                for (raw) |c| {
+                                    try node.string_value.append(c);
+                                }
                                 break;
                             }
                         }
@@ -652,6 +658,12 @@ const Parser = struct {
                     else => {
                         self.token_it.seekBy(-1);
                         node.end = self.token_it.pos - 1;
+                        const start_token = self.tree.tokens[node.start.?];
+                        const end_token = self.tree.tokens[node.end.?];
+                        const raw = self.tree.source[start_token.start..end_token.end];
+                        for (raw) |c| {
+                            try node.string_value.append(c);
+                        }
                         break;
                     },
                 }

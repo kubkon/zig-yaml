@@ -180,11 +180,12 @@ pub const Value = union(ValueType) {
                 return switch (hint) {
                     .int => Value{ .int = try std.fmt.parseInt(i64, raw, 10) },
                     .float => Value{ .float = try std.fmt.parseFloat(f64, raw) },
-                    .string => switch (value.escape_mode) {
-                        .None => Value{ .string = try arena.dupe(u8, raw) },
-                        .DoubleQuote => Value{ .string = try arena.dupe(u8, value.string_value.items) },
-                        .SingleQuote => Value{ .string = try arena.dupe(u8, value.string_value.items) },
-                    },
+                    .string => Value{ .string = try arena.dupe(u8, value.string_value.items) },
+                    // switch (value.escape_mode) {
+                    //     .None => Value{ .string = try arena.dupe(u8, raw) },
+                    //     .DoubleQuote => Value{ .string = try arena.dupe(u8, value.string_value.items) },
+                    //     .SingleQuote => Value{ .string = try arena.dupe(u8, value.string_value.items) },
+                    // },
                     else => unreachable,
                 };
             }
