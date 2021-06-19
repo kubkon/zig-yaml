@@ -371,10 +371,11 @@ pub const Yaml = struct {
                 continue;
             }
 
-            @field(parsed, field.name) = try self.parseValue(
-                field.field_type,
-                value orelse return error.StructFieldMissing,
-            );
+            const unwrapped = value orelse {
+                log.err("missing struct field: {s}: {s}", .{ field.name, @typeName(field.field_type) });
+                return error.StructFieldMissing;
+            };
+            @field(parsed, field.name) = try self.parseValue(field.field_type, unwrapped);
         }
 
         return parsed;
@@ -648,16 +649,4 @@ test "typed array size mismatch" {
 
     try testing.expectError(Yaml.Error.ArraySizeMismatch, yaml.parse([1]usize));
     try testing.expectError(Yaml.Error.ArraySizeMismatch, yaml.parse([5]usize));
-}
-
-test "typed struct missing field" {
-    const source =
-        \\bar: 10
-    ;
-
-    var yaml = try Yaml.load(testing.allocator, source);
-    defer yaml.deinit();
-
-    try testing.expectError(Yaml.Error.StructFieldMissing, yaml.parse(struct { foo: usize }));
-    try testing.expectError(Yaml.Error.StructFieldMissing, yaml.parse(struct { foobar: usize }));
 }
