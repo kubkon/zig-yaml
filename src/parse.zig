@@ -171,10 +171,13 @@ pub const Node = struct {
         base: Node = Node{ .tag = Tag.value, .tree = undefined },
         start: ?TokenIndex = null,
         end: ?TokenIndex = null,
+        string_value: std.ArrayListUnmanaged(u8) = .{},
 
         pub const base_tag: Node.Tag = .value;
 
-        pub fn deinit(self: *Value, allocator: *Allocator) void {}
+        pub fn deinit(self: *Value, allocator: *Allocator) void {
+            self.string_value.deinit(allocator);
+        }
 
         pub fn format(
             self: *const Value,
@@ -552,7 +555,10 @@ const Parser = struct {
         errdefer self.allocator.destroy(node);
         node.* = .{
             .start = start,
+            .string_value = .{},
         };
+        errdefer node.string_value.deinit(self.allocator);
+
         node.base.tree = self.tree;
 
         self.token_it.seekTo(start);
@@ -571,7 +577,12 @@ const Parser = struct {
                             break :parse;
                         },
                         .NewLine => return error.UnexpectedToken,
-                        else => {},
+                        .EscapeSeq => {
+                            try node.string_value.append(self.allocator, self.tree.source[tok.start + 1]);
+                        },
+                        else => {
+                            try node.string_value.appendSlice(self.allocator, self.tree.source[tok.start..tok.end]);
+                        },
                     }
                 }
             }
@@ -587,7 +598,23 @@ const Parser = struct {
                             break :parse;
                         },
                         .NewLine => return error.UnexpectedToken,
-                        else => {},
+                        .EscapeSeq => {
+                            switch (self.tree.source[tok.start + 1]) {
+                                'n' => {
+                                    try node.string_value.append(self.allocator, '\n');
+                                },
+                                't' => {
+                                    try node.string_value.append(self.allocator, '\t');
+                                },
+                                '"' => {
+                                    try node.string_value.append(self.allocator, '"');
+                                },
+                                else => {},
+                            }
+                        },
+                        else => {
+                            try node.string_value.appendSlice(self.allocator, self.tree.source[tok.start..tok.end]);
+                        },
                     }
                 }
             }
@@ -604,6 +631,10 @@ const Parser = struct {
                         if (self.token_it.peek()) |peek| {
                             if (peek.id != .Literal) {
                                 node.end = trailing;
+                                const start_token = self.tree.tokens[node.start.?];
+                                const end_token = self.tree.tokens[node.end.?];
+                                const raw = self.tree.source[start_token.start..end_token.end];
+                                try node.string_value.appendSlice(self.allocator, raw);
                                 break;
                             }
                         }
@@ -611,6 +642,10 @@ const Parser = struct {
                     else => {
                         self.token_it.seekBy(-1);
                         node.end = self.token_it.pos - 1;
+                        const start_token = self.tree.tokens[node.start.?];
+                        const end_token = self.tree.tokens[node.end.?];
+                        const raw = self.tree.source[start_token.start..end_token.end];
+                        try node.string_value.appendSlice(self.allocator, raw);
                         break;
                     },
                 }

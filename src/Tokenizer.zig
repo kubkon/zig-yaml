@@ -6,6 +6,13 @@ const testing = std.testing;
 
 buffer: []const u8,
 index: usize = 0,
+string_type: StringType = .Unquoted,
+
+const StringType = enum {
+    Unquoted,
+    SingleQuoted,
+    DoubleQuoted,
+};
 
 pub const Token = struct {
     id: Id,
@@ -37,6 +44,7 @@ pub const Token = struct {
         Tag, // !
         SingleQuote, // '
         DoubleQuote, // "
+        EscapeSeq, // '' for single quoted strings, starts with \ for double quoted strings
 
         Literal,
     };
@@ -91,7 +99,9 @@ pub fn next(self: *Tokenizer) Token {
         Tab: usize,
         Hyphen: usize,
         Dot: usize,
+        SingleQuoteOrEscape,
         Literal,
+        EscapeSeq,
     } = .Start;
 
     while (self.index < self.buffer.len) : (self.index += 1) {
@@ -144,12 +154,26 @@ pub fn next(self: *Tokenizer) Token {
                     break;
                 },
                 '\'' => {
-                    result.id = .SingleQuote;
-                    self.index += 1;
-                    break;
+                    switch (self.string_type) {
+                        .Unquoted => {
+                            result.id = .SingleQuote;
+                            self.string_type = if (self.string_type == .SingleQuoted) .Unquoted else .SingleQuoted;
+                            self.index += 1;
+                            break;
+                        },
+                        .SingleQuoted => {
+                            state = .SingleQuoteOrEscape;
+                        },
+                        .DoubleQuoted => {
+                            result.id = .SingleQuote;
+                            self.index += 1;
+                            break;
+                        },
+                    }
                 },
                 '"' => {
                     result.id = .DoubleQuote;
+                    self.string_type = if (self.string_type == .DoubleQuoted) .Unquoted else .DoubleQuoted;
                     self.index += 1;
                     break;
                 },
@@ -177,6 +201,13 @@ pub fn next(self: *Tokenizer) Token {
                     result.id = .FlowMapEnd;
                     self.index += 1;
                     break;
+                },
+                '\\' => {
+                    if (self.string_type == .DoubleQuoted) {
+                        state = .EscapeSeq;
+                    } else {
+                        state = .Literal;
+                    }
                 },
                 else => {
                     state = .Literal;
@@ -243,7 +274,26 @@ pub fn next(self: *Tokenizer) Token {
                     state = .Literal;
                 },
             },
+            .SingleQuoteOrEscape => switch (c) {
+                '\'' => {
+                    result.id = .EscapeSeq;
+                    self.index += 1;
+                    break;
+                },
+                else => {
+                    self.string_type = .Unquoted;
+                    result.id = .SingleQuote;
+                    break;
+                },
+            },
             .Literal => switch (c) {
+                '\\' => {
+                    result.id = .Literal;
+                    if (self.string_type == .DoubleQuoted) {
+                        // escape sequence
+                        break;
+                    }
+                },
                 '\r', '\n', ' ', '\'', '"', ',', ':', ']', '}' => {
                     result.id = .Literal;
                     break;
@@ -252,11 +302,25 @@ pub fn next(self: *Tokenizer) Token {
                     result.id = .Literal;
                 },
             },
+            .EscapeSeq => {
+                // Only support single character escape codes for now...
+                result.id = .EscapeSeq;
+                self.index += 1;
+                break;
+            },
         }
     }
 
-    if (state == .Literal and result.id == .Eof) {
-        result.id = .Literal;
+    if (self.index >= self.buffer.len) {
+        switch (state) {
+            .Literal => {
+                result.id = .Literal;
+            },
+            .SingleQuoteOrEscape => {
+                result.id = .SingleQuote;
+            },
+            else => {},
+        }
     }
 
     result.end = self.index;
@@ -434,6 +498,42 @@ test "part of tdb" {
         .SingleQuote,
         .NewLine,
         .DocEnd,
+        .Eof,
+    });
+}
+
+test "escape sequences" {
+    try testExpected(
+        \\a: 'here''s an apostrophe'
+        \\b: "a newline\nand a\ttab"
+    , &[_]Token.Id{
+        .Literal,
+        .MapValueInd,
+        .Space,
+        .SingleQuote,
+        .Literal,
+        .EscapeSeq,
+        .Literal,
+        .Space,
+        .Literal,
+        .Space,
+        .Literal,
+        .SingleQuote,
+        .NewLine,
+        .Literal,
+        .MapValueInd,
+        .Space,
+        .DoubleQuote,
+        .Literal,
+        .Space,
+        .Literal,
+        .EscapeSeq,
+        .Literal,
+        .Space,
+        .Literal,
+        .EscapeSeq,
+        .Literal,
+        .DoubleQuote,
         .Eof,
     });
 }
