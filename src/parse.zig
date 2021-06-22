@@ -1,5 +1,4 @@
 const std = @import("std");
-const ArrayList = std.ArrayList;
 const assert = std.debug.assert;
 const log = std.log.scoped(.parse);
 const mem = std.mem;
@@ -172,12 +171,12 @@ pub const Node = struct {
         base: Node = Node{ .tag = Tag.value, .tree = undefined },
         start: ?TokenIndex = null,
         end: ?TokenIndex = null,
-        string_value: ArrayList(u8) = undefined,
+        string_value: std.ArrayListUnmanaged(u8) = .{},
 
         pub const base_tag: Node.Tag = .value;
 
         pub fn deinit(self: *Value, allocator: *Allocator) void {
-            self.string_value.deinit();
+            self.string_value.deinit(allocator);
         }
 
         pub fn format(
@@ -556,9 +555,9 @@ const Parser = struct {
         errdefer self.allocator.destroy(node);
         node.* = .{
             .start = start,
-            .string_value = ArrayList(u8).init(self.allocator),
+            .string_value = .{},
         };
-        errdefer node.string_value.deinit();
+        errdefer node.string_value.deinit(self.allocator);
 
         node.base.tree = self.tree;
 
@@ -579,12 +578,10 @@ const Parser = struct {
                         },
                         .NewLine => return error.UnexpectedToken,
                         .EscapeSeq => {
-                            try node.string_value.append(self.tree.source[tok.start + 1]);
+                            try node.string_value.append(self.allocator, self.tree.source[tok.start + 1]);
                         },
                         else => {
-                            for (self.tree.source[tok.start..tok.end]) |c| {
-                                try node.string_value.append(c);
-                            }
+                            try node.string_value.appendSlice(self.allocator, self.tree.source[tok.start..tok.end]);
                         },
                     }
                 }
@@ -604,21 +601,19 @@ const Parser = struct {
                         .EscapeSeq => {
                             switch (self.tree.source[tok.start + 1]) {
                                 'n' => {
-                                    try node.string_value.append('\n');
+                                    try node.string_value.append(self.allocator, '\n');
                                 },
                                 't' => {
-                                    try node.string_value.append('\t');
+                                    try node.string_value.append(self.allocator, '\t');
                                 },
                                 '"' => {
-                                    try node.string_value.append('"');
+                                    try node.string_value.append(self.allocator, '"');
                                 },
                                 else => {},
                             }
                         },
                         else => {
-                            for (self.tree.source[tok.start..tok.end]) |c| {
-                                try node.string_value.append(c);
-                            }
+                            try node.string_value.appendSlice(self.allocator, self.tree.source[tok.start..tok.end]);
                         },
                     }
                 }
@@ -639,9 +634,7 @@ const Parser = struct {
                                 const start_token = self.tree.tokens[node.start.?];
                                 const end_token = self.tree.tokens[node.end.?];
                                 const raw = self.tree.source[start_token.start..end_token.end];
-                                for (raw) |c| {
-                                    try node.string_value.append(c);
-                                }
+                                try node.string_value.appendSlice(self.allocator, raw);
                                 break;
                             }
                         }
@@ -652,9 +645,7 @@ const Parser = struct {
                         const start_token = self.tree.tokens[node.start.?];
                         const end_token = self.tree.tokens[node.end.?];
                         const raw = self.tree.source[start_token.start..end_token.end];
-                        for (raw) |c| {
-                            try node.string_value.append(c);
-                        }
+                        try node.string_value.appendSlice(self.allocator, raw);
                         break;
                     },
                 }
