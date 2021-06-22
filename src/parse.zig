@@ -172,7 +172,6 @@ pub const Node = struct {
         base: Node = Node{ .tag = Tag.value, .tree = undefined },
         start: ?TokenIndex = null,
         end: ?TokenIndex = null,
-        escape_mode: EscapeMode = .None,
         string_value: ArrayList(u8) = undefined,
 
         pub const base_tag: Node.Tag = .value;
@@ -193,12 +192,6 @@ pub const Node = struct {
                 self.base.tree.source[start.start..end.end],
             });
         }
-
-        const EscapeMode = enum {
-            None,
-            SingleQuote,
-            DoubleQuote,
-        };
     };
 };
 
@@ -575,7 +568,6 @@ const Parser = struct {
 
         parse: {
             if (self.eatToken(.SingleQuote)) |_| {
-                node.escape_mode = .SingleQuote;
                 node.start = node.start.? + 1;
                 while (true) {
                     const pos = self.token_it.pos;
@@ -599,7 +591,6 @@ const Parser = struct {
             }
 
             if (self.eatToken(.DoubleQuote)) |_| {
-                node.escape_mode = .DoubleQuote;
                 node.start = node.start.? + 1;
                 while (true) {
                     const pos = self.token_it.pos;
