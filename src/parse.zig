@@ -82,6 +82,8 @@ pub const Node = struct {
             options: std.fmt.FormatOptions,
             writer: anytype,
         ) !void {
+            _ = options;
+            _ = fmt;
             if (self.directive) |id| {
                 try std.fmt.format(writer, "{{ ", .{});
                 const directive = self.base.tree.tokens[id];
@@ -125,6 +127,8 @@ pub const Node = struct {
             options: std.fmt.FormatOptions,
             writer: anytype,
         ) !void {
+            _ = options;
+            _ = fmt;
             try std.fmt.format(writer, "{{ ", .{});
             for (self.values.items) |entry| {
                 const key = self.base.tree.tokens[entry.key];
@@ -159,6 +163,8 @@ pub const Node = struct {
             options: std.fmt.FormatOptions,
             writer: anytype,
         ) !void {
+            _ = options;
+            _ = fmt;
             try std.fmt.format(writer, "[ ", .{});
             for (self.values.items) |node| {
                 try std.fmt.format(writer, "{}, ", .{node});
@@ -185,6 +191,8 @@ pub const Node = struct {
             options: std.fmt.FormatOptions,
             writer: anytype,
         ) !void {
+            _ = options;
+            _ = fmt;
             const start = self.base.tree.tokens[self.start.?];
             const end = self.base.tree.tokens[self.end.?];
             return std.fmt.format(writer, "{s}", .{
@@ -569,7 +577,6 @@ const Parser = struct {
             if (self.eatToken(.SingleQuote)) |_| {
                 node.start = node.start.? + 1;
                 while (true) {
-                    const pos = self.token_it.pos;
                     const tok = self.token_it.next();
                     switch (tok.id) {
                         .SingleQuote => {
@@ -590,7 +597,6 @@ const Parser = struct {
             if (self.eatToken(.DoubleQuote)) |_| {
                 node.start = node.start.? + 1;
                 while (true) {
-                    const pos = self.token_it.pos;
                     const tok = self.token_it.next();
                     switch (tok.id) {
                         .DoubleQuote => {
@@ -621,7 +627,6 @@ const Parser = struct {
 
             // TODO handle multiline strings in new block scope
             while (true) {
-                const pos = self.token_it.pos;
                 const tok = self.token_it.next();
                 switch (tok.id) {
                     .Literal => {},
