@@ -14,9 +14,9 @@ const usage =
 ;
 
 pub fn main() !void {
-    var arena = std.heap.ArenaAllocator.init(&gpa.allocator);
+    var arena = std.heap.ArenaAllocator.init(gpa.allocator());
     defer arena.deinit();
-    const allocator = &arena.allocator;
+    const allocator = arena.allocator();
 
     const args = try std.process.argsAlloc(allocator);
     if (args.len == 1) {

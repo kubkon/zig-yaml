@@ -9,4 +9,4 @@ tar xf "$ZIG.tar.xz"
 export PATH="$(pwd)/$ZIG:$PATH"
 
 zig build test
-
+zig build run

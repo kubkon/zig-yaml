@@ -9,4 +9,4 @@ curl -L "https://ziglang.org/builds/$ZIG.zip" -o "$ZIG.zip"
 export PATH="$(pwd)/$ZIG:$PATH"
 
 zig build test
-
+zig build run
