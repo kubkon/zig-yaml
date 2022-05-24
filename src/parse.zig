@@ -471,6 +471,10 @@ const Parser = struct {
                         if (self.eatToken(.MapValueInd)) |_| {
                             if (self.eatToken(.NewLine)) |_| {
                                 try self.openScope();
+                            } else {
+                                try self.scopes.append(self.allocator, .{
+                                    .indent = self.scopes.items[self.scopes.items.len - 1].indent + 2,
+                                });
                             }
                             // nested map
                             const map_node = try self.map(pos);

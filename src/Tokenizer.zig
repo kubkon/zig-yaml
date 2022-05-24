@@ -336,10 +336,18 @@ fn testExpected(source: []const u8, expected: []const Token.Id) !void {
         .buffer = source,
     };
 
+    var token_len: usize = 0;
     for (expected) |exp| {
+        token_len += 1;
         const token = tokenizer.next();
         try testing.expectEqual(exp, token.id);
     }
+
+    while (tokenizer.next().id != .Eof) {
+        token_len += 1; // consume all tokens
+    }
+
+    try testing.expectEqual(expected.len, token_len);
 }
 
 test "empty doc" {
@@ -440,7 +448,7 @@ test "inline mapped sequence of values" {
     });
 }
 
-test "part of tdb" {
+test "part of tbd" {
     try testExpected(
         \\--- !tapi-tbd
         \\tbd-version:     4
@@ -499,6 +507,28 @@ test "part of tdb" {
         .NewLine,
         .DocEnd,
         .Eof,
+    });
+}
+
+test "Unindented list" {
+    try testExpected(
+        \\b:
+        \\- foo: 1
+        \\c: 1
+    , &[_]Token.Id{
+        .Literal,
+        .MapValueInd,
+        .NewLine,
+        .SeqItemInd,
+        .Literal,
+        .MapValueInd,
+        .Space,
+        .Literal,
+        .NewLine,
+        .Literal,
+        .MapValueInd,
+        .Space,
+        .Literal,
     });
 }
 
