@@ -548,8 +548,6 @@ test "simple map untyped with a list of maps. no indent" {
     var yaml = try Yaml.load(testing.allocator, source);
     defer yaml.deinit();
 
-    std.debug.print("\n\n", .{});
-
     try testing.expectEqual(yaml.docs.items.len, 1);
 
     const map = yaml.docs.items[0].map;

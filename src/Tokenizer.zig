@@ -18,9 +18,6 @@ pub const Token = struct {
     id: Id,
     start: usize,
     end: usize,
-    // Count of spaces/tabs.
-    // Only active for .Space and .Tab tokens.
-    count: ?usize = null,
 
     pub const Id = enum {
         Eof,
@@ -95,8 +92,8 @@ pub fn next(self: *Tokenizer) Token {
     var state: union(enum) {
         Start,
         NewLine,
-        Space: usize,
-        Tab: usize,
+        Space,
+        Tab,
         Hyphen: usize,
         Dot: usize,
         SingleQuoteOrEscape,
@@ -109,10 +106,10 @@ pub fn next(self: *Tokenizer) Token {
         switch (state) {
             .Start => switch (c) {
                 ' ' => {
-                    state = .{ .Space = 1 };
+                    state = .Space;
                 },
                 '\t' => {
-                    state = .{ .Tab = 1 };
+                    state = .Tab;
                 },
                 '\n' => {
                     result.id = .NewLine;
@@ -213,23 +210,17 @@ pub fn next(self: *Tokenizer) Token {
                     state = .Literal;
                 },
             },
-            .Space => |*count| switch (c) {
-                ' ' => {
-                    count.* += 1;
-                },
+            .Space => switch (c) {
+                ' ' => {},
                 else => {
                     result.id = .Space;
-                    result.count = count.*;
                     break;
                 },
             },
-            .Tab => |*count| switch (c) {
-                ' ' => {
-                    count.* += 1;
-                },
+            .Tab => switch (c) {
+                '\t' => {},
                 else => {
                     result.id = .Tab;
-                    result.count = count.*;
                     break;
                 },
             },
