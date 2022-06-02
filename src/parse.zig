@@ -252,8 +252,8 @@ pub const Tree = struct {
             });
 
             switch (token.id) {
-                .Eof => break,
-                .NewLine => {
+                .eof => break,
+                .new_line => {
                     line += 1;
                     prev_line_last_col = token.end;
                 },
@@ -281,8 +281,8 @@ pub const Tree = struct {
             log.debug("Next token: {}, {}", .{ pos, token });
 
             switch (token.id) {
-                .Space, .Comment, .NewLine => {},
-                .Eof => break,
+                .space, .comment, .new_line => {},
+                .eof => break,
                 else => {
                     const doc = try parser.doc(pos);
                     try self.docs.append(self.allocator, &doc.base);
@@ -308,11 +308,11 @@ const Parser = struct {
 
         log.debug("Doc start: {}, {}", .{ start, self.tree.tokens[start] });
 
-        const explicit_doc: bool = if (self.eatToken(.DocStart)) |_| explicit_doc: {
-            if (self.eatToken(.Tag)) |_| {
-                node.directive = try self.expectToken(.Literal);
+        const explicit_doc: bool = if (self.eatToken(.doc_start)) |_| explicit_doc: {
+            if (self.eatToken(.tag)) |_| {
+                node.directive = try self.expectToken(.literal);
             }
-            _ = try self.expectToken(.NewLine);
+            _ = try self.expectToken(.new_line);
             break :explicit_doc true;
         } else false;
 
@@ -323,27 +323,27 @@ const Parser = struct {
             log.debug("Next token: {}, {}", .{ pos, token });
 
             switch (token.id) {
-                .Tag => {
+                .tag => {
                     return error.UnexpectedTag;
                 },
-                .Literal, .SingleQuote, .DoubleQuote => {
-                    _ = try self.expectToken(.MapValueInd);
+                .literal, .single_quote, .double_quote => {
+                    _ = try self.expectToken(.map_value_ind);
                     const map_node = try self.map(pos);
                     node.value = &map_node.base;
                 },
-                .SeqItemInd => {
+                .seq_item_ind => {
                     const list_node = try self.list(pos);
                     node.value = &list_node.base;
                 },
-                .FlowSeqStart => {
+                .flow_seq_start => {
                     const list_node = try self.list_bracketed(pos);
                     node.value = &list_node.base;
                 },
-                .DocEnd => {
+                .doc_end => {
                     if (explicit_doc) break;
                     return error.UnexpectedToken;
                 },
-                .DocStart, .Eof => {
+                .doc_start, .eof => {
                     self.token_it.seekBy(-1);
                     break;
                 },
@@ -383,7 +383,7 @@ const Parser = struct {
 
             const key = self.token_it.next();
             switch (key.id) {
-                .Literal => {},
+                .literal => {},
                 else => {
                     self.token_it.seekBy(-1);
                     break;
@@ -393,23 +393,23 @@ const Parser = struct {
             log.debug("Map key: {}, '{s}'", .{ key, self.tree.source[key.start..key.end] });
 
             // Separator
-            _ = try self.expectToken(.MapValueInd);
+            _ = try self.expectToken(.map_value_ind);
 
             // Parse value.
             const value: *Node = value: {
-                if (self.eatToken(.NewLine)) |_| {
+                if (self.eatToken(.new_line)) |_| {
                     self.eatCommentsAndSpace();
 
                     // Explicit, complex value such as list or map.
                     const value_pos = self.token_it.pos;
                     const value = self.token_it.next();
                     switch (value.id) {
-                        .Literal, .SingleQuote, .DoubleQuote => {
+                        .literal, .single_quote, .double_quote => {
                             // Assume nested map.
                             const map_node = try self.map(value_pos);
                             break :value &map_node.base;
                         },
-                        .SeqItemInd => {
+                        .seq_item_ind => {
                             // Assume list of values.
                             const list_node = try self.list(value_pos);
                             break :value &list_node.base;
@@ -425,12 +425,12 @@ const Parser = struct {
                     const value_pos = self.token_it.pos;
                     const value = self.token_it.next();
                     switch (value.id) {
-                        .Literal, .SingleQuote, .DoubleQuote => {
+                        .literal, .single_quote, .double_quote => {
                             // Assume leaf value.
                             const leaf_node = try self.leaf_value(value_pos);
                             break :value &leaf_node.base;
                         },
-                        .FlowSeqStart => {
+                        .flow_seq_start => {
                             const list_node = try self.list_bracketed(value_pos);
                             break :value &list_node.base;
                         },
@@ -448,7 +448,7 @@ const Parser = struct {
                 .value = value,
             });
 
-            _ = self.eatToken(.NewLine);
+            _ = self.eatToken(.new_line);
         }
 
         node.end = self.token_it.pos - 1;
@@ -478,7 +478,7 @@ const Parser = struct {
             if (self.getCol(self.token_it.pos) != col) {
                 break;
             }
-            _ = self.eatToken(.SeqItemInd) orelse {
+            _ = self.eatToken(.seq_item_ind) orelse {
                 break;
             };
 
@@ -486,8 +486,8 @@ const Parser = struct {
             const token = self.token_it.next();
             const value: *Node = value: {
                 switch (token.id) {
-                    .Literal, .SingleQuote, .DoubleQuote => {
-                        if (self.eatToken(.MapValueInd)) |_| {
+                    .literal, .single_quote, .double_quote => {
+                        if (self.eatToken(.map_value_ind)) |_| {
                             // nested map
                             const map_node = try self.map(pos);
                             break :value &map_node.base;
@@ -497,7 +497,7 @@ const Parser = struct {
                             break :value &leaf_node.base;
                         }
                     },
-                    .FlowSeqStart => {
+                    .flow_seq_start => {
                         const list_node = try self.list_bracketed(pos);
                         break :value &list_node.base;
                     },
@@ -509,7 +509,7 @@ const Parser = struct {
             };
             try node.values.append(self.allocator, value);
 
-            _ = self.eatToken(.NewLine);
+            _ = self.eatToken(.new_line);
         }
 
         node.end = self.token_it.pos - 1;
@@ -529,10 +529,10 @@ const Parser = struct {
 
         log.debug("List start: {}, {}", .{ start, self.tree.tokens[start] });
 
-        _ = try self.expectToken(.FlowSeqStart);
+        _ = try self.expectToken(.flow_seq_start);
 
         while (true) {
-            _ = self.eatToken(.NewLine);
+            _ = self.eatToken(.new_line);
             self.eatCommentsAndSpace();
 
             const pos = self.token_it.pos;
@@ -542,16 +542,16 @@ const Parser = struct {
 
             const value: *Node = value: {
                 switch (token.id) {
-                    .FlowSeqStart => {
+                    .flow_seq_start => {
                         const list_node = try self.list_bracketed(pos);
                         break :value &list_node.base;
                     },
-                    .FlowSeqEnd => {
+                    .flow_seq_end => {
                         break;
                     },
-                    .Literal, .SingleQuote, .DoubleQuote => {
+                    .literal, .single_quote, .double_quote => {
                         const leaf_node = try self.leaf_value(pos);
-                        _ = self.eatToken(.Comma);
+                        _ = self.eatToken(.comma);
                         // TODO newline
                         break :value &leaf_node.base;
                     },
@@ -586,17 +586,17 @@ const Parser = struct {
         log.debug("Leaf start: {}, {}", .{ node.start.?, self.tree.tokens[node.start.?] });
 
         parse: {
-            if (self.eatToken(.SingleQuote)) |_| {
+            if (self.eatToken(.single_quote)) |_| {
                 node.start = node.start.? + 1;
                 while (true) {
                     const tok = self.token_it.next();
                     switch (tok.id) {
-                        .SingleQuote => {
+                        .single_quote => {
                             node.end = self.token_it.pos - 2;
                             break :parse;
                         },
-                        .NewLine => return error.UnexpectedToken,
-                        .EscapeSeq => {
+                        .new_line => return error.UnexpectedToken,
+                        .escape_seq => {
                             try node.string_value.append(self.allocator, self.tree.source[tok.start + 1]);
                         },
                         else => {
@@ -606,17 +606,17 @@ const Parser = struct {
                 }
             }
 
-            if (self.eatToken(.DoubleQuote)) |_| {
+            if (self.eatToken(.double_quote)) |_| {
                 node.start = node.start.? + 1;
                 while (true) {
                     const tok = self.token_it.next();
                     switch (tok.id) {
-                        .DoubleQuote => {
+                        .double_quote => {
                             node.end = self.token_it.pos - 2;
                             break :parse;
                         },
-                        .NewLine => return error.UnexpectedToken,
-                        .EscapeSeq => {
+                        .new_line => return error.UnexpectedToken,
+                        .escape_seq => {
                             switch (self.tree.source[tok.start + 1]) {
                                 'n' => {
                                     try node.string_value.append(self.allocator, '\n');
@@ -641,12 +641,12 @@ const Parser = struct {
             while (true) {
                 const tok = self.token_it.next();
                 switch (tok.id) {
-                    .Literal => {},
-                    .Space => {
+                    .literal => {},
+                    .space => {
                         const trailing = self.token_it.pos - 2;
                         self.eatCommentsAndSpace();
                         if (self.token_it.peek()) |peek| {
-                            if (peek.id != .Literal) {
+                            if (peek.id != .literal) {
                                 node.end = trailing;
                                 const start_token = self.tree.tokens[node.start.?];
                                 const end_token = self.tree.tokens[node.end.?];
@@ -679,7 +679,7 @@ const Parser = struct {
             _ = self.token_it.peek() orelse return;
             const token = self.token_it.next();
             switch (token.id) {
-                .Comment, .Space => {},
+                .comment, .space => {},
                 else => {
                     self.token_it.seekBy(-1);
                     break;
@@ -694,7 +694,7 @@ const Parser = struct {
             _ = self.token_it.peek() orelse return null;
             const token = self.token_it.next();
             switch (token.id) {
-                .Comment, .Space => continue,
+                .comment, .space => continue,
                 else => |next_id| if (next_id == id) {
                     return pos;
                 } else {
