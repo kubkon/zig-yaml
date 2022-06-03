@@ -2,7 +2,6 @@ const std = @import("std");
 const assert = std.debug.assert;
 const log = std.log.scoped(.parse);
 const mem = std.mem;
-const testing = std.testing;
 
 const Allocator = mem.Allocator;
 const Tokenizer = @import("Tokenizer.zig");
@@ -207,7 +206,7 @@ pub const Node = struct {
         ) !void {
             _ = options;
             _ = fmt;
-            const raw = self.tree.getRaw(self.base.start, self.base.end);
+            const raw = self.base.tree.getRaw(self.base.start, self.base.end);
             return std.fmt.format(writer, "{s}", .{raw});
         }
     };
@@ -293,8 +292,12 @@ pub const Tree = struct {
 
         parser.eatCommentsAndSpace(&.{});
 
-        while (parser.token_it.next()) |token| {
+        while (true) {
+            parser.eatCommentsAndSpace(&.{});
+            const token = parser.token_it.next() orelse break;
+
             log.debug("(main) next {s}@{d}", .{ @tagName(token.id), parser.token_it.pos - 1 });
+
             switch (token.id) {
                 .eof => break,
                 else => {
@@ -695,5 +698,6 @@ const Parser = struct {
 };
 
 test {
+    std.testing.refAllDecls(@This());
     _ = @import("parse/test.zig");
 }

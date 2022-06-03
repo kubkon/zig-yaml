@@ -355,6 +355,10 @@ fn testExpected(source: []const u8, expected: []const Token.Id) !void {
     try testing.expectEqual(expected.len, token_len);
 }
 
+test {
+    std.testing.refAllDecls(@This());
+}
+
 test "empty doc" {
     try testExpected("", &[_]Token.Id{.eof});
 }
