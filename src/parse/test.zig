@@ -115,6 +115,51 @@ test "double quote string on one line is fine" {
     );
 }
 
+test "map with key and value literals" {
+    try parseSuccess(
+        \\key1: val1
+        \\key2 : val2
+    );
+}
+
+test "map of maps" {
+    try parseSuccess(
+        \\
+        \\# the first key
+        \\key1:
+        \\  # the first subkey
+        \\  key1_1: 0
+        \\  key1_2: 1
+        \\# the second key
+        \\key2:
+        \\  key2_1: -1
+        \\  key2_2: -2
+        \\# the end of map
+    );
+}
+
+test "map value indicator needs to be on the same line" {
+    try parseError(
+        \\a
+        \\  : b
+    , error.UnexpectedToken);
+}
+
+test "value needs to be indented" {
+    try parseError(
+        \\a:
+        \\b
+    , error.MalformedYaml);
+}
+
+test "comment between a key and a value is fine" {
+    try parseSuccess(
+        \\a:
+        \\  # this is a value
+        \\  b
+    );
+}
+
 // test "explicit doc" {
 //     const source =
 //         \\--- !tapi-tbd

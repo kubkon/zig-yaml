@@ -159,7 +159,7 @@ pub const Value = union(ValueType) {
             try out_map.ensureUnusedCapacity(map.values.items.len);
 
             for (map.values.items) |entry| {
-                const key = try arena.dupe(u8, tree.getRaw(entry.key, entry.key + 1));
+                const key = try arena.dupe(u8, tree.getRaw(entry.key, entry.key));
                 const value = try Value.fromNode(arena, tree, entry.value, null);
                 out_map.putAssumeCapacityNoClobber(key, value);
             }

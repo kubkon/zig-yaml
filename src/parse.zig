@@ -90,7 +90,7 @@ pub const Node = struct {
             _ = fmt;
             if (self.directive) |id| {
                 try std.fmt.format(writer, "{{ ", .{});
-                const directive = self.base.tree.getRaw(id, id + 1);
+                const directive = self.base.tree.getRaw(id, id);
                 try std.fmt.format(writer, ".directive = {s}, ", .{directive});
             }
             if (self.value) |node| {
@@ -136,7 +136,7 @@ pub const Node = struct {
             _ = fmt;
             try std.fmt.format(writer, "{{ ", .{});
             for (self.values.items) |entry| {
-                const key = self.base.tree.getRaw(entry.key, entry.key + 1);
+                const key = self.base.tree.getRaw(entry.key, entry.key);
                 try std.fmt.format(writer, "{s} => {}, ", .{ key, entry.value });
             }
             return std.fmt.format(writer, " }}", .{});
@@ -294,7 +294,7 @@ pub const Tree = struct {
                 else => {
                     parser.token_it.seekBy(-1);
                     const doc = try parser.doc();
-                    try self.docs.append(self.allocator, &doc.base);
+                    try self.docs.append(self.allocator, doc);
                 },
             }
         }
@@ -307,45 +307,27 @@ const Parser = struct {
     token_it: *TokenIterator,
     line_cols: *const std.AutoHashMap(TokenIndex, LineCol),
 
-    fn doc(self: *Parser) ParseError!*Node.Doc {
-        const node = try self.allocator.create(Node.Doc);
-        errdefer self.allocator.destroy(node);
-        node.* = .{};
-        node.base.tree = self.tree;
-        node.base.start = self.token_it.pos;
-
-        log.warn("(doc) begin {s}@{d}", .{ @tagName(self.tree.tokens[node.base.start].id), node.base.start });
-
-        // Parse header
-        const explicit_doc: bool = if (self.eatToken(.doc_start, &.{})) |_| explicit_doc: {
-            if (self.eatToken(.tag, &.{ .new_line, .comment })) |_| {
-                node.directive = try self.expectToken(.literal, &.{ .new_line, .comment });
-            }
-            break :explicit_doc true;
-        } else false;
-
-        // Parse value
+    fn value(self: *Parser) ParseError!?*Node {
         self.eatCommentsAndSpace(&.{});
+
         const pos = self.token_it.pos;
         const token = self.token_it.next() orelse return error.UnexpectedEof;
 
-        log.warn("(doc) next {s}@{d}", .{ @tagName(token.id), pos });
+        log.warn("  next {s}@{d}", .{ @tagName(token.id), pos });
 
         switch (token.id) {
             .literal => if (self.eatToken(.map_value_ind, &.{ .new_line, .comment })) |_| {
-                // TODO
-                return error.Unhandled;
+                self.token_it.seekTo(pos);
+                return self.map();
             } else {
                 // leaf value
                 self.token_it.seekBy(-1);
-                const leaf_node = try self.leaf_value();
-                node.value = &leaf_node.base;
+                return self.leaf_value();
             },
             .single_quote, .double_quote => {
                 // leaf value
                 self.token_it.seekBy(-1);
-                const leaf_node = try self.leaf_value();
-                node.value = &leaf_node.base;
+                return self.leaf_value();
             },
             // .seq_item_ind => {
             //     const list_node = try self.list(pos);
@@ -355,106 +337,125 @@ const Parser = struct {
             //     const list_node = try self.list_bracketed(pos);
             //     node.value = &list_node.base;
             // },
-            else => {
-                self.token_it.seekBy(-1);
-            },
+            else => return null,
         }
-        errdefer if (node.value) |value| {
-            value.deinit(self.allocator);
-            self.allocator.destroy(value);
+    }
+
+    fn doc(self: *Parser) ParseError!*Node {
+        const node = try self.allocator.create(Node.Doc);
+        errdefer self.allocator.destroy(node);
+        node.* = .{};
+        node.base.tree = self.tree;
+        node.base.start = self.token_it.pos;
+
+        log.warn("(doc) begin {s}@{d}", .{ @tagName(self.tree.tokens[node.base.start].id), node.base.start });
+
+        // Parse header
+        const explicit_doc: bool = if (self.eatToken(.doc_start, &.{})) |doc_pos| explicit_doc: {
+            if (self.getCol(doc_pos) > 0) return error.MalformedYaml;
+            if (self.eatToken(.tag, &.{ .new_line, .comment })) |_| {
+                node.directive = try self.expectToken(.literal, &.{ .new_line, .comment });
+            }
+            break :explicit_doc true;
+        } else false;
+
+        // Parse value
+        node.value = try self.value();
+        if (node.value == null) {
+            self.token_it.seekBy(-1);
+        }
+        errdefer if (node.value) |val| {
+            val.deinit(self.allocator);
+            self.allocator.destroy(val);
         };
 
         // Parse footer
-        self.eatCommentsAndSpace(&.{});
-
-        if (self.token_it.next()) |tok| switch (tok.id) {
-            .doc_start => if (explicit_doc) {
+        footer: {
+            if (self.eatToken(.doc_end, &.{})) |pos| {
+                if (!explicit_doc) return error.UnexpectedToken;
+                if (self.getCol(pos) > 0) return error.MalformedYaml;
+                node.base.end = pos;
+                break :footer;
+            }
+            if (self.eatToken(.doc_start, &.{})) |pos| {
+                if (!explicit_doc) return error.UnexpectedToken;
+                if (self.getCol(pos) > 0) return error.MalformedYaml;
                 self.token_it.seekBy(-1);
-            } else return error.UnexpectedToken,
-            .doc_end => if (!explicit_doc) return error.UnexpectedToken,
-            .eof => {},
-            else => return error.UnexpectedToken,
-        } else return error.UnexpectedEof;
-
-        node.base.end = self.token_it.pos - 1;
+                node.base.end = pos - 1;
+                break :footer;
+            }
+            if (self.eatToken(.eof, &.{})) |pos| {
+                node.base.end = pos - 1;
+                break :footer;
+            }
+            return error.UnexpectedToken;
+        }
 
         log.warn("(doc) end {s}@{d}", .{ @tagName(self.tree.tokens[node.base.end].id), node.base.end });
 
-        return node;
+        return &node.base;
     }
 
-    fn map(self: *Parser, start: TokenIndex) ParseError!*Node.Map {
+    fn map(self: *Parser) ParseError!*Node {
         const node = try self.allocator.create(Node.Map);
         errdefer self.allocator.destroy(node);
-        node.* = .{ .start = start };
+        node.* = .{};
         node.base.tree = self.tree;
+        node.base.start = self.token_it.pos;
 
-        self.token_it.seekTo(start);
+        log.warn("(map) being {s}@{d}", .{ @tagName(self.tree.tokens[node.base.start].id), node.base.start });
 
-        const col = self.getCol(start);
+        const col = self.getCol(node.base.start);
 
         while (true) {
-            // Parse key.
+            self.eatCommentsAndSpace(&.{});
+
+            // Parse key
             const key_pos = self.token_it.pos;
-            if (self.getCol(key_pos) != col) {
+            if (self.getCol(key_pos) < col) {
                 break;
             }
 
-            const key = self.token_it.next();
+            const key = self.token_it.next() orelse return error.UnexpectedEof;
             switch (key.id) {
                 .literal => {},
-                else => {
+                .eof => {
                     self.token_it.seekBy(-1);
                     break;
                 },
+                else => {
+                    // TODO key not being a literal
+                    return error.Unhandled;
+                },
             }
 
-            log.warn("key={s}", .{self.tree.source[key.start..key.end]});
+            log.warn("(map) key {s}@{d}", .{ self.tree.getRaw(key_pos, key_pos), key_pos });
 
             // Separator
-            _ = try self.expectToken(.map_value_ind);
-            self.eatCommentsAndSpace();
+            _ = try self.expectToken(.map_value_ind, &.{ .new_line, .comment });
 
-            log.warn("value=", .{});
+            // Parse value
+            const val = (try self.value()) orelse return error.MalformedYaml;
+            errdefer {
+                val.deinit(self.allocator);
+                self.allocator.destroy(val);
+            }
 
-            // Parse value.
-            const value: *Node = value: {
-                // Explicit, complex value such as list or map.
-                const value_pos = self.token_it.pos;
-                const value = self.token_it.next();
-                switch (value.id) {
-                    .literal, .single_quote, .double_quote => {
-                        // Assume nested map.
-                        const map_node = try self.map(value_pos);
-                        break :value &map_node.base;
-                    },
-                    .seq_item_ind => {
-                        // Assume list of values.
-                        const list_node = try self.list(value_pos);
-                        break :value &list_node.base;
-                    },
-                    .flow_seq_start => {
-                        const list_node = try self.list_bracketed(value_pos);
-                        break :value &list_node.base;
-                    },
-                    else => {
-                        log.err("{}", .{key});
-                        return error.Unhandled;
-                    },
-                }
-            };
+            if (self.getCol(val.start) <= self.getCol(key_pos)) {
+                return error.MalformedYaml;
+            }
 
             try node.values.append(self.allocator, .{
                 .key = key_pos,
-                .value = value,
+                .value = val,
             });
-
-            _ = self.eatToken(.new_line);
         }
 
-        node.end = self.token_it.pos - 1;
+        node.base.end = self.token_it.pos - 1;
 
-        return node;
+        log.warn("(map) end {s}@{d}", .{ @tagName(self.tree.tokens[node.base.end].id), node.base.end });
+
+        return &node.base;
     }
 
     fn list(self: *Parser, start: TokenIndex) ParseError!*Node.List {
@@ -479,22 +480,22 @@ const Parser = struct {
 
             const pos = self.token_it.pos;
             const token = self.token_it.next();
-            const value: *Node = value: {
+            const val: *Node = val: {
                 switch (token.id) {
                     .literal, .single_quote, .double_quote => {
                         if (self.eatToken(.map_value_ind)) |_| {
                             // nested map
                             const map_node = try self.map(pos);
-                            break :value &map_node.base;
+                            break :val &map_node.base;
                         } else {
                             // standalone (leaf) value
                             const leaf_node = try self.leaf_value(pos);
-                            break :value &leaf_node.base;
+                            break :val &leaf_node.base;
                         }
                     },
                     .flow_seq_start => {
                         const list_node = try self.list_bracketed(pos);
-                        break :value &list_node.base;
+                        break :val &list_node.base;
                     },
                     else => {
                         log.err("{}", .{token});
@@ -502,7 +503,7 @@ const Parser = struct {
                     },
                 }
             };
-            try node.values.append(self.allocator, value);
+            try node.values.append(self.allocator, val);
 
             _ = self.eatToken(.new_line);
         }
@@ -533,11 +534,11 @@ const Parser = struct {
 
             log.warn("Next token: {}, {}", .{ pos, token });
 
-            const value: *Node = value: {
+            const val: *Node = val: {
                 switch (token.id) {
                     .flow_seq_start => {
                         const list_node = try self.list_bracketed(pos);
-                        break :value &list_node.base;
+                        break :val &list_node.base;
                     },
                     .flow_seq_end => {
                         break;
@@ -546,7 +547,7 @@ const Parser = struct {
                         const leaf_node = try self.leaf_value(pos);
                         _ = self.eatToken(.comma);
                         // TODO newline
-                        break :value &leaf_node.base;
+                        break :val &leaf_node.base;
                     },
                     else => {
                         log.err("{}", .{token});
@@ -554,7 +555,7 @@ const Parser = struct {
                     },
                 }
             };
-            try node.values.append(self.allocator, value);
+            try node.values.append(self.allocator, val);
         }
 
         node.end = self.token_it.pos - 1;
@@ -564,7 +565,7 @@ const Parser = struct {
         return node;
     }
 
-    fn leaf_value(self: *Parser) ParseError!*Node.Value {
+    fn leaf_value(self: *Parser) ParseError!*Node {
         const node = try self.allocator.create(Node.Value);
         errdefer self.allocator.destroy(node);
         node.* = .{ .string_value = .{} };
@@ -654,7 +655,7 @@ const Parser = struct {
 
         log.warn("(leaf) {s}", .{self.tree.getRaw(node.base.start, node.base.end)});
 
-        return node;
+        return &node.base;
     }
 
     fn eatCommentsAndSpace(self: *Parser, comptime exclusions: []const Token.Id) void {
