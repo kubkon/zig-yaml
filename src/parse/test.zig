@@ -6,160 +6,6 @@ const parse = @import("../parse.zig");
 const Node = parse.Node;
 const Tree = parse.Tree;
 
-fn parseSuccess(comptime source: []const u8) !void {
-    var tree = Tree.init(testing.allocator);
-    defer tree.deinit();
-    try tree.parse(source);
-}
-
-fn parseError(comptime source: []const u8, err: parse.ParseError) !void {
-    var tree = Tree.init(testing.allocator);
-    defer tree.deinit();
-    try testing.expectError(err, tree.parse(source));
-}
-
-test "empty doc with spaces and comments" {
-    try parseSuccess(
-        \\
-        \\
-        \\   # this is a comment in a weird place
-        \\# and this one is too
-    );
-}
-
-test "comment between --- and ! in document start" {
-    try parseError(
-        \\--- # what is it?
-        \\!
-    , error.UnexpectedToken);
-}
-
-test "correct doc start with tag" {
-    try parseSuccess(
-        \\--- !some-tag
-        \\
-    );
-}
-
-test "doc close without explicit doc open" {
-    try parseError(
-        \\
-        \\
-        \\# something cool
-        \\...
-    , error.UnexpectedToken);
-}
-
-test "doc open and close are ok" {
-    try parseSuccess(
-        \\---
-        \\# first doc
-        \\
-        \\
-        \\---
-        \\# second doc
-        \\
-        \\
-        \\...
-    );
-}
-
-test "doc with a single string is ok" {
-    try parseSuccess(
-        \\a string of some sort
-        \\
-    );
-}
-
-test "explicit doc with a single string is ok" {
-    try parseSuccess(
-        \\--- !anchor
-        \\# nothing to see here except one string
-        \\  # not a lot to go on with
-        \\a single string
-        \\...
-    );
-}
-
-test "doc with two string is bad" {
-    try parseError(
-        \\first
-        \\second
-        \\# this should fail already
-    , error.UnexpectedToken);
-}
-
-test "single quote string cannot have new lines" {
-    try parseError(
-        \\'what is this
-        \\ thing?'
-    , error.UnexpectedToken);
-}
-
-test "single quote string on one line is fine" {
-    try parseSuccess(
-        \\'here''s an apostrophe'
-    );
-}
-
-test "double quote string cannot have new lines" {
-    try parseError(
-        \\"what is this
-        \\ thing?"
-    , error.UnexpectedToken);
-}
-
-test "double quote string on one line is fine" {
-    try parseSuccess(
-        \\"a newline\nand a\ttab"
-    );
-}
-
-test "map with key and value literals" {
-    try parseSuccess(
-        \\key1: val1
-        \\key2 : val2
-    );
-}
-
-test "map of maps" {
-    try parseSuccess(
-        \\
-        \\# the first key
-        \\key1:
-        \\  # the first subkey
-        \\  key1_1: 0
-        \\  key1_2: 1
-        \\# the second key
-        \\key2:
-        \\  key2_1: -1
-        \\  key2_2: -2
-        \\# the end of map
-    );
-}
-
-test "map value indicator needs to be on the same line" {
-    try parseError(
-        \\a
-        \\  : b
-    , error.UnexpectedToken);
-}
-
-test "value needs to be indented" {
-    try parseError(
-        \\a:
-        \\b
-    , error.MalformedYaml);
-}
-
-test "comment between a key and a value is fine" {
-    try parseSuccess(
-        \\a:
-        \\  # this is a value
-        \\  b
-    );
-}
-
 // test "explicit doc" {
 //     const source =
 //         \\--- !tapi-tbd
@@ -710,3 +556,225 @@ test "comment between a key and a value is fine" {
 //         try testing.expect(mem.eql(u8, "avg", tree.source[leaf.start..leaf.end]));
 //     }
 // }
+
+fn parseSuccess(comptime source: []const u8) !void {
+    var tree = Tree.init(testing.allocator);
+    defer tree.deinit();
+    try tree.parse(source);
+}
+
+fn parseError(comptime source: []const u8, err: parse.ParseError) !void {
+    var tree = Tree.init(testing.allocator);
+    defer tree.deinit();
+    try testing.expectError(err, tree.parse(source));
+}
+
+test "empty doc with spaces and comments" {
+    try parseSuccess(
+        \\
+        \\
+        \\   # this is a comment in a weird place
+        \\# and this one is too
+    );
+}
+
+test "comment between --- and ! in document start" {
+    try parseError(
+        \\--- # what is it?
+        \\!
+    , error.UnexpectedToken);
+}
+
+test "correct doc start with tag" {
+    try parseSuccess(
+        \\--- !some-tag
+        \\
+    );
+}
+
+test "doc close without explicit doc open" {
+    try parseError(
+        \\
+        \\
+        \\# something cool
+        \\...
+    , error.UnexpectedToken);
+}
+
+test "doc open and close are ok" {
+    try parseSuccess(
+        \\---
+        \\# first doc
+        \\
+        \\
+        \\---
+        \\# second doc
+        \\
+        \\
+        \\...
+    );
+}
+
+test "doc with a single string is ok" {
+    try parseSuccess(
+        \\a string of some sort
+        \\
+    );
+}
+
+test "explicit doc with a single string is ok" {
+    try parseSuccess(
+        \\--- !anchor
+        \\# nothing to see here except one string
+        \\  # not a lot to go on with
+        \\a single string
+        \\...
+    );
+}
+
+test "doc with two string is bad" {
+    try parseError(
+        \\first
+        \\second
+        \\# this should fail already
+    , error.UnexpectedToken);
+}
+
+test "single quote string cannot have new lines" {
+    try parseError(
+        \\'what is this
+        \\ thing?'
+    , error.UnexpectedToken);
+}
+
+test "single quote string on one line is fine" {
+    try parseSuccess(
+        \\'here''s an apostrophe'
+    );
+}
+
+test "double quote string cannot have new lines" {
+    try parseError(
+        \\"what is this
+        \\ thing?"
+    , error.UnexpectedToken);
+}
+
+test "double quote string on one line is fine" {
+    try parseSuccess(
+        \\"a newline\nand a\ttab"
+    );
+}
+
+test "map with key and value literals" {
+    try parseSuccess(
+        \\key1: val1
+        \\key2 : val2
+    );
+}
+
+test "map of maps" {
+    try parseSuccess(
+        \\
+        \\# the first key
+        \\key1:
+        \\  # the first subkey
+        \\  key1_1: 0
+        \\  key1_2: 1
+        \\# the second key
+        \\key2:
+        \\  key2_1: -1
+        \\  key2_2: -2
+        \\# the end of map
+    );
+}
+
+test "map value indicator needs to be on the same line" {
+    try parseError(
+        \\a
+        \\  : b
+    , error.UnexpectedToken);
+}
+
+test "value needs to be indented" {
+    try parseError(
+        \\a:
+        \\b
+    , error.MalformedYaml);
+}
+
+test "comment between a key and a value is fine" {
+    try parseSuccess(
+        \\a:
+        \\  # this is a value
+        \\  b
+    );
+}
+
+test "simple list" {
+    try parseSuccess(
+        \\# first el
+        \\- a
+        \\# second el
+        \\-  b
+        \\# third el
+        \\-   c
+    );
+}
+
+test "list indentation matters" {
+    try parseSuccess(
+        \\  - a
+        \\- b
+    );
+
+    try parseSuccess(
+        \\- a
+        \\  - b
+    );
+}
+
+test "unindented list is fine too" {
+    try parseSuccess(
+        \\a:
+        \\- 0
+        \\- 1
+    );
+}
+
+test "empty values in a map" {
+    try parseSuccess(
+        \\a:
+        \\b:
+        \\- 0
+    );
+}
+
+test "weirdly nested map of maps of lists" {
+    try parseSuccess(
+        \\a:
+        \\ b:
+        \\  - 0
+        \\  - 1
+    );
+}
+
+test "square brackets denote a list" {
+    try parseSuccess(
+        \\[ a,
+        \\  b, c ]
+    );
+}
+
+test "empty list" {
+    try parseSuccess(
+        \\[ ]
+    );
+}
+
+test "comment within a bracketed list is an error" {
+    try parseError(
+        \\[ # something
+        \\]
+    , error.MalformedYaml);
+}

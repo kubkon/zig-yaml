@@ -115,13 +115,15 @@ pub const Node = struct {
 
         pub const Entry = struct {
             key: TokenIndex,
-            value: *Node,
+            value: ?*Node,
         };
 
         pub fn deinit(self: *Map, allocator: Allocator) void {
             for (self.values.items) |entry| {
-                entry.value.deinit(allocator);
-                allocator.destroy(entry.value);
+                if (entry.value) |value| {
+                    value.deinit(allocator);
+                    allocator.destroy(value);
+                }
             }
             self.values.deinit(allocator);
         }
@@ -137,7 +139,11 @@ pub const Node = struct {
             try std.fmt.format(writer, "{{ ", .{});
             for (self.values.items) |entry| {
                 const key = self.base.tree.getRaw(entry.key, entry.key);
-                try std.fmt.format(writer, "{s} => {}, ", .{ key, entry.value });
+                if (entry.value) |value| {
+                    try std.fmt.format(writer, "{s} => {}, ", .{ key, value });
+                } else {
+                    try std.fmt.format(writer, "{s} => null, ", .{key});
+                }
             }
             return std.fmt.format(writer, " }}", .{});
         }
@@ -317,6 +323,7 @@ const Parser = struct {
 
         switch (token.id) {
             .literal => if (self.eatToken(.map_value_ind, &.{ .new_line, .comment })) |_| {
+                // map
                 self.token_it.seekTo(pos);
                 return self.map();
             } else {
@@ -329,14 +336,16 @@ const Parser = struct {
                 self.token_it.seekBy(-1);
                 return self.leaf_value();
             },
-            // .seq_item_ind => {
-            //     const list_node = try self.list(pos);
-            //     node.value = &list_node.base;
-            // },
-            // .flow_seq_start => {
-            //     const list_node = try self.list_bracketed(pos);
-            //     node.value = &list_node.base;
-            // },
+            .seq_item_ind => {
+                // list
+                self.token_it.seekBy(-1);
+                return self.list();
+            },
+            .flow_seq_start => {
+                // list
+                self.token_it.seekBy(-1);
+                return self.list_bracketed();
+            },
             else => return null,
         }
     }
@@ -403,7 +412,7 @@ const Parser = struct {
         node.base.tree = self.tree;
         node.base.start = self.token_it.pos;
 
-        log.warn("(map) being {s}@{d}", .{ @tagName(self.tree.tokens[node.base.start].id), node.base.start });
+        log.warn("(map) begin {s}@{d}", .{ @tagName(self.tree.tokens[node.base.start].id), node.base.start });
 
         const col = self.getCol(node.base.start);
 
@@ -435,14 +444,21 @@ const Parser = struct {
             _ = try self.expectToken(.map_value_ind, &.{ .new_line, .comment });
 
             // Parse value
-            const val = (try self.value()) orelse return error.MalformedYaml;
-            errdefer {
-                val.deinit(self.allocator);
-                self.allocator.destroy(val);
-            }
+            const val = try self.value();
+            errdefer if (val) |v| {
+                v.deinit(self.allocator);
+                self.allocator.destroy(v);
+            };
 
-            if (self.getCol(val.start) <= self.getCol(key_pos)) {
-                return error.MalformedYaml;
+            if (val) |v| {
+                if (self.getCol(v.start) < self.getCol(key_pos)) {
+                    return error.MalformedYaml;
+                }
+                if (v.cast(Node.Value)) |_| {
+                    if (self.getCol(v.start) == self.getCol(key_pos)) {
+                        return error.MalformedYaml;
+                    }
+                }
             }
 
             try node.values.append(self.allocator, .{
@@ -458,111 +474,59 @@ const Parser = struct {
         return &node.base;
     }
 
-    fn list(self: *Parser, start: TokenIndex) ParseError!*Node.List {
+    fn list(self: *Parser) ParseError!*Node {
         const node = try self.allocator.create(Node.List);
         errdefer self.allocator.destroy(node);
-        node.* = .{
-            .start = start,
-        };
+        node.* = .{};
         node.base.tree = self.tree;
+        node.base.start = self.token_it.pos;
 
-        self.token_it.seekTo(start);
-
-        const col = self.getCol(start);
+        log.warn("(list) begin {s}@{d}", .{ @tagName(self.tree.tokens[node.base.start].id), node.base.start });
 
         while (true) {
-            if (self.getCol(self.token_it.pos) != col) {
-                break;
-            }
-            _ = self.eatToken(.seq_item_ind) orelse {
-                break;
-            };
+            self.eatCommentsAndSpace(&.{});
 
-            const pos = self.token_it.pos;
-            const token = self.token_it.next();
-            const val: *Node = val: {
-                switch (token.id) {
-                    .literal, .single_quote, .double_quote => {
-                        if (self.eatToken(.map_value_ind)) |_| {
-                            // nested map
-                            const map_node = try self.map(pos);
-                            break :val &map_node.base;
-                        } else {
-                            // standalone (leaf) value
-                            const leaf_node = try self.leaf_value(pos);
-                            break :val &leaf_node.base;
-                        }
-                    },
-                    .flow_seq_start => {
-                        const list_node = try self.list_bracketed(pos);
-                        break :val &list_node.base;
-                    },
-                    else => {
-                        log.err("{}", .{token});
-                        return error.Unhandled;
-                    },
-                }
-            };
+            _ = self.eatToken(.seq_item_ind, &.{}) orelse break;
+
+            const val = (try self.value()) orelse return error.MalformedYaml;
             try node.values.append(self.allocator, val);
-
-            _ = self.eatToken(.new_line);
         }
 
-        node.end = self.token_it.pos - 1;
+        node.base.end = self.token_it.pos - 1;
 
-        return node;
+        log.warn("(list) end {s}@{d}", .{ @tagName(self.tree.tokens[node.base.end].id), node.base.end });
+
+        return &node.base;
     }
 
-    fn list_bracketed(self: *Parser, start: TokenIndex) ParseError!*Node.List {
+    fn list_bracketed(self: *Parser) ParseError!*Node {
         const node = try self.allocator.create(Node.List);
         errdefer self.allocator.destroy(node);
-        node.* = .{ .start = start };
+        node.* = .{};
         node.base.tree = self.tree;
+        node.base.start = self.token_it.pos;
+        errdefer node.values.deinit(self.allocator);
 
-        self.token_it.seekTo(start);
+        log.warn("(list) begin {s}@{d}", .{ @tagName(self.tree.tokens[node.base.start].id), node.base.start });
 
-        log.warn("List start: {}, {}", .{ start, self.tree.tokens[start] });
-
-        _ = try self.expectToken(.flow_seq_start);
+        _ = try self.expectToken(.flow_seq_start, &.{});
 
         while (true) {
-            _ = self.eatToken(.new_line);
-            self.eatCommentsAndSpace();
+            self.eatCommentsAndSpace(&.{.comment});
 
-            const pos = self.token_it.pos;
-            const token = self.token_it.next();
+            if (self.eatToken(.flow_seq_end, &.{.comment})) |pos| {
+                node.base.end = pos;
+                break;
+            }
+            _ = self.eatToken(.comma, &.{.comment});
 
-            log.warn("Next token: {}, {}", .{ pos, token });
-
-            const val: *Node = val: {
-                switch (token.id) {
-                    .flow_seq_start => {
-                        const list_node = try self.list_bracketed(pos);
-                        break :val &list_node.base;
-                    },
-                    .flow_seq_end => {
-                        break;
-                    },
-                    .literal, .single_quote, .double_quote => {
-                        const leaf_node = try self.leaf_value(pos);
-                        _ = self.eatToken(.comma);
-                        // TODO newline
-                        break :val &leaf_node.base;
-                    },
-                    else => {
-                        log.err("{}", .{token});
-                        return error.Unhandled;
-                    },
-                }
-            };
+            const val = (try self.value()) orelse return error.MalformedYaml;
             try node.values.append(self.allocator, val);
         }
 
-        node.end = self.token_it.pos - 1;
+        log.warn("(list) end {s}@{d}", .{ @tagName(self.tree.tokens[node.base.end].id), node.base.end });
 
-        log.warn("List end: {}, {}", .{ node.end.?, self.tree.tokens[node.end.?] });
-
-        return node;
+        return &node.base;
     }
 
     fn leaf_value(self: *Parser) ParseError!*Node {
