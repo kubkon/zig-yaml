@@ -12,13 +12,13 @@ pub fn build(b: *std.build.Builder) void {
     var main_tests = b.addTest("src/main.zig");
     main_tests.setBuildMode(mode);
 
-    var e2e_tests = b.addTest("test/test.zig");
-    e2e_tests.setBuildMode(mode);
-    e2e_tests.addPackagePath("yaml", "src/main.zig");
+    // var e2e_tests = b.addTest("test/test.zig");
+    // e2e_tests.setBuildMode(mode);
+    // e2e_tests.addPackagePath("yaml", "src/main.zig");
 
     const test_step = b.step("test", "Run library tests");
     test_step.dependOn(&main_tests.step);
-    test_step.dependOn(&e2e_tests.step);
+    // test_step.dependOn(&e2e_tests.step);
 
     const example = b.addExecutable("yaml", "examples/yaml.zig");
     example.setBuildMode(mode);

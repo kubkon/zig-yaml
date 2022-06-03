@@ -55,8 +55,8 @@ pub const TokenIterator = struct {
     buffer: []const Token,
     pos: TokenIndex = 0,
 
-    pub fn next(self: *TokenIterator) Token {
-        const token = self.buffer[self.pos];
+    pub fn next(self: *TokenIterator) ?Token {
+        const token = self.peek() orelse return null;
         self.pos += 1;
         return token;
     }
@@ -96,6 +96,7 @@ pub fn next(self: *Tokenizer) Token {
         new_line,
         space,
         tab,
+        comment,
         hyphen: usize,
         dot: usize,
         single_quote_or_escape,
@@ -133,9 +134,7 @@ pub fn next(self: *Tokenizer) Token {
                     break;
                 },
                 '#' => {
-                    result.id = .comment;
-                    self.index += 1;
-                    break;
+                    state = .comment;
                 },
                 '*' => {
                     result.id = .alias;
@@ -217,6 +216,13 @@ pub fn next(self: *Tokenizer) Token {
                 else => {
                     state = .literal;
                 },
+            },
+            .comment => switch (c) {
+                '\r', '\n' => {
+                    result.id = .comment;
+                    break;
+                },
+                else => {},
             },
             .space => switch (c) {
                 ' ' => {},
@@ -563,6 +569,32 @@ test "escape sequences" {
         .escape_seq,
         .literal,
         .double_quote,
+        .eof,
+    });
+}
+
+test "comments" {
+    try testExpected(
+        \\key: # some comment about the key
+        \\# first value
+        \\- val1
+        \\# second value
+        \\- val2
+    , &[_]Token.Id{
+        .literal,
+        .map_value_ind,
+        .space,
+        .comment,
+        .new_line,
+        .comment,
+        .new_line,
+        .seq_item_ind,
+        .literal,
+        .new_line,
+        .comment,
+        .new_line,
+        .seq_item_ind,
+        .literal,
         .eof,
     });
 }
