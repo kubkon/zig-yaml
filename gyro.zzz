@@ -1,0 +1,19 @@
+pkgs:
+  yaml:
+    version: 0.0.1
+    license: MIT
+    description: YAML parser for Zig
+    source_url: "https://github.com/kubkon/zig-yaml"
+    root: src/yaml.zig
+    files:
+      README.md
+      LICENSE
+      build.zig
+      src/*.zig
+      src/parse/*.zig
+      src/yaml/*.zig
+      examples/*.zig
+      examples/*.yml
+      test/*.zig
+      test/*.tbd
+      test/*.yaml
