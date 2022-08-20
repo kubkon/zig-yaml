@@ -150,7 +150,7 @@ pub const Value = union(ValueType) {
         if (node.cast(Node.Doc)) |doc| {
             const inner = doc.value orelse {
                 // empty doc
-                return Value{ .empty = .{} };
+                return Value{ .empty = {} };
             };
             return Value.fromNode(arena, tree, inner, null);
         } else if (node.cast(Node.Map)) |map| {
@@ -312,7 +312,7 @@ pub const Yaml = struct {
 
     fn parseValue(self: *Yaml, comptime T: type, value: Value) Error!T {
         return switch (@typeInfo(T)) {
-            .Int => math.cast(T, try value.asInt()),
+            .Int => math.cast(T, try value.asInt()) orelse return error.Overflow,
             .Float => math.lossyCast(T, try value.asFloat()),
             .Struct => self.parseStruct(T, try value.asMap()),
             .Union => self.parseUnion(T, value),
