@@ -334,7 +334,7 @@ const Parser = struct {
                 self.token_it.seekTo(pos);
                 return self.leaf_value();
             },
-            .single_quote, .double_quote => {
+            .single_quoted, .double_quoted => {
                 // leaf value
                 self.token_it.seekBy(-1);
                 return self.leaf_value();
@@ -562,85 +562,97 @@ const Parser = struct {
         node.base.start = self.token_it.pos;
         errdefer node.string_value.deinit(self.allocator);
 
-        parse: {
-            if (self.eatToken(.single_quote, &.{})) |_| {
-                node.base.start = node.base.start + 1;
-                while (self.token_it.next()) |tok| {
-                    switch (tok.id) {
-                        .single_quote => {
-                            node.base.end = self.token_it.pos - 2;
-                            break :parse;
-                        },
-                        .new_line => return error.UnexpectedToken,
-                        .escape_seq => {
-                            const ch = self.tree.source[tok.start + 1];
-                            try node.string_value.append(self.allocator, ch);
-                        },
-                        else => {
-                            const str = self.tree.source[tok.start..tok.end];
-                            try node.string_value.appendSlice(self.allocator, str);
-                        },
-                    }
-                }
-            }
-
-            if (self.eatToken(.double_quote, &.{})) |_| {
-                node.base.start = node.base.start + 1;
-                while (self.token_it.next()) |tok| {
-                    switch (tok.id) {
-                        .double_quote => {
-                            node.base.end = self.token_it.pos - 2;
-                            break :parse;
-                        },
-                        .new_line => return error.UnexpectedToken,
-                        .escape_seq => {
-                            switch (self.tree.source[tok.start + 1]) {
-                                'n' => {
-                                    try node.string_value.append(self.allocator, '\n');
-                                },
-                                't' => {
-                                    try node.string_value.append(self.allocator, '\t');
-                                },
-                                '"' => {
-                                    try node.string_value.append(self.allocator, '"');
-                                },
-                                else => {},
-                            }
-                        },
-                        else => {
-                            const str = self.tree.source[tok.start..tok.end];
-                            try node.string_value.appendSlice(self.allocator, str);
-                        },
-                    }
-                }
-            }
-
-            // TODO handle multiline strings in new block scope
-            while (self.token_it.next()) |tok| {
-                switch (tok.id) {
-                    .literal => {},
-                    .space => {
-                        const trailing = self.token_it.pos - 2;
-                        self.eatCommentsAndSpace(&.{});
-                        if (self.token_it.peek()) |peek| {
-                            if (peek.id != .literal) {
-                                node.base.end = trailing;
-                                const raw = self.tree.getRaw(node.base.start, node.base.end);
-                                try node.string_value.appendSlice(self.allocator, raw);
-                                break;
-                            }
+        // TODO handle multiline strings in new block scope
+        while (self.token_it.next()) |tok| {
+            switch (tok.id) {
+                .single_quoted => {
+                    node.base.end = self.token_it.pos - 1;
+                    const raw = self.tree.getRaw(node.base.start, node.base.end);
+                    log.warn("single_quoted = {s}", .{raw});
+                    return error.UnexpectedToken;
+                },
+                .double_quoted => {
+                    node.base.end = self.token_it.pos - 1;
+                    const raw = self.tree.getRaw(node.base.start, node.base.end);
+                    log.warn("double_quoted = {s}", .{raw});
+                    return error.UnexpectedToken;
+                },
+                .literal => {},
+                .space => {
+                    const trailing = self.token_it.pos - 2;
+                    self.eatCommentsAndSpace(&.{});
+                    if (self.token_it.peek()) |peek| {
+                        if (peek.id != .literal) {
+                            node.base.end = trailing;
+                            const raw = self.tree.getRaw(node.base.start, node.base.end);
+                            try node.string_value.appendSlice(self.allocator, raw);
+                            break;
                         }
-                    },
-                    else => {
-                        self.token_it.seekBy(-1);
-                        node.base.end = self.token_it.pos - 1;
-                        const raw = self.tree.getRaw(node.base.start, node.base.end);
-                        try node.string_value.appendSlice(self.allocator, raw);
-                        break;
-                    },
-                }
+                    }
+                },
+                else => {
+                    self.token_it.seekBy(-1);
+                    node.base.end = self.token_it.pos - 1;
+                    const raw = self.tree.getRaw(node.base.start, node.base.end);
+                    try node.string_value.appendSlice(self.allocator, raw);
+                    break;
+                },
             }
         }
+
+        // parse: {
+        //     if (self.eatToken(.single_quote, &.{})) |_| {
+        //         node.base.start = node.base.start + 1;
+        //         while (self.token_it.next()) |tok| {
+        //             switch (tok.id) {
+        //                 .single_quote => {
+        //                     node.base.end = self.token_it.pos - 2;
+        //                     break :parse;
+        //                 },
+        //                 .new_line => return error.UnexpectedToken,
+        //                 .escape_seq => {
+        //                     const ch = self.tree.source[tok.start + 1];
+        //                     try node.string_value.append(self.allocator, ch);
+        //                 },
+        //                 else => {
+        //                     const str = self.tree.source[tok.start..tok.end];
+        //                     try node.string_value.appendSlice(self.allocator, str);
+        //                 },
+        //             }
+        //         }
+        //     }
+
+        //     if (self.eatToken(.double_quote, &.{})) |_| {
+        //         node.base.start = node.base.start + 1;
+        //         while (self.token_it.next()) |tok| {
+        //             switch (tok.id) {
+        //                 .double_quote => {
+        //                     node.base.end = self.token_it.pos - 2;
+        //                     break :parse;
+        //                 },
+        //                 .new_line => return error.UnexpectedToken,
+        //                 .escape_seq => {
+        //                     switch (self.tree.source[tok.start + 1]) {
+        //                         'n' => {
+        //                             try node.string_value.append(self.allocator, '\n');
+        //                         },
+        //                         't' => {
+        //                             try node.string_value.append(self.allocator, '\t');
+        //                         },
+        //                         '"' => {
+        //                             try node.string_value.append(self.allocator, '"');
+        //                         },
+        //                         else => {},
+        //                     }
+        //                 },
+        //                 else => {
+        //                     const str = self.tree.source[tok.start..tok.end];
+        //                     try node.string_value.appendSlice(self.allocator, str);
+        //                 },
+        //             }
+        //         }
+        //     }
+        // }
 
         log.debug("(leaf) {s}", .{self.tree.getRaw(node.base.start, node.base.end)});
 
