@@ -366,3 +366,30 @@ test "comments" {
     try testing.expectEqualStrings("val1", simple.key[0]);
     try testing.expectEqualStrings("val2", simple.key[1]);
 }
+
+test "promote ints to floats in a list mixed numeric types" {
+    const source =
+        \\a_list: [0, 1.0]
+    ;
+
+    var yaml = try Yaml.load(testing.allocator, source);
+    defer yaml.deinit();
+
+    const simple = try yaml.parse(struct {
+        a_list: []const f64,
+    });
+    try testing.expectEqualSlices(f64, &[_]f64{ 0.0, 1.0 }, simple.a_list);
+}
+
+test "demoting floats to ints in a list is an error" {
+    const source =
+        \\a_list: [0, 1.0]
+    ;
+
+    var yaml = try Yaml.load(testing.allocator, source);
+    defer yaml.deinit();
+
+    try testing.expectError(error.TypeMismatch, yaml.parse(struct {
+        a_list: []const u64,
+    }));
+}
