@@ -334,18 +334,16 @@ fn testExpected(source: []const u8, expected: []const Token.Id) !void {
         .buffer = source,
     };
 
-    var token_len: usize = 0;
-    for (expected) |exp| {
-        token_len += 1;
+    var given = std.ArrayList(Token.Id).init(testing.allocator);
+    defer given.deinit();
+
+    while (true) {
         const token = tokenizer.next();
-        try testing.expectEqual(exp, token.id);
+        try given.append(token.id);
+        if (token.id == .eof) break;
     }
 
-    while (tokenizer.next().id != .eof) {
-        token_len += 1; // consume all tokens
-    }
-
-    try testing.expectEqual(expected.len, token_len);
+    try testing.expectEqualSlices(Token.Id, expected, given.items);
 }
 
 test {
@@ -531,6 +529,7 @@ test "Unindented list" {
         .map_value_ind,
         .space,
         .literal,
+        .eof,
     });
 }
 
