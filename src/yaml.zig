@@ -171,11 +171,9 @@ pub const Value = union(ValueType) {
             var out_list = std.ArrayList(Value).init(arena);
             try out_list.ensureUnusedCapacity(list.values.items.len);
 
-            if (list.values.items.len > 0) {
-                for (list.values.items) |elem| {
-                    const value = try Value.fromNode(arena, tree, elem);
-                    out_list.appendAssumeCapacity(value);
-                }
+            for (list.values.items) |elem| {
+                const value = try Value.fromNode(arena, tree, elem);
+                out_list.appendAssumeCapacity(value);
             }
 
             return Value{ .list = out_list.toOwnedSlice() };
