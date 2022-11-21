@@ -151,26 +151,24 @@ pub fn next(self: *Tokenizer) Token {
                     self.index += 1;
                     break;
                 },
-                '\'' => {
-                    switch (self.string_type) {
-                        .unquoted => {
-                            result.id = .single_quote;
-                            self.string_type = if (self.string_type == .single_quoted)
-                                .unquoted
-                            else
-                                .single_quoted;
-                            self.index += 1;
-                            break;
-                        },
-                        .single_quoted => {
-                            state = .single_quote_or_escape;
-                        },
-                        .double_quoted => {
-                            result.id = .single_quote;
-                            self.index += 1;
-                            break;
-                        },
-                    }
+                '\'' => switch (self.string_type) {
+                    .unquoted => {
+                        result.id = .single_quote;
+                        self.string_type = if (self.string_type == .single_quoted)
+                            .unquoted
+                        else
+                            .single_quoted;
+                        self.index += 1;
+                        break;
+                    },
+                    .single_quoted => {
+                        state = .single_quote_or_escape;
+                    },
+                    .double_quoted => {
+                        result.id = .single_quote;
+                        self.index += 1;
+                        break;
+                    },
                 },
                 '"' => {
                     result.id = .double_quote;
@@ -206,17 +204,16 @@ pub fn next(self: *Tokenizer) Token {
                     self.index += 1;
                     break;
                 },
-                '\\' => {
-                    if (self.string_type == .double_quoted) {
-                        state = .escape_seq;
-                    } else {
-                        state = .literal;
-                    }
+                '\\' => if (self.string_type == .double_quoted) {
+                    state = .escape_seq;
+                } else {
+                    state = .literal;
                 },
                 else => {
                     state = .literal;
                 },
             },
+
             .comment => switch (c) {
                 '\r', '\n' => {
                     result.id = .comment;
@@ -224,6 +221,7 @@ pub fn next(self: *Tokenizer) Token {
                 },
                 else => {},
             },
+
             .space => switch (c) {
                 ' ' => {},
                 else => {
@@ -231,6 +229,7 @@ pub fn next(self: *Tokenizer) Token {
                     break;
                 },
             },
+
             .tab => switch (c) {
                 '\t' => {},
                 else => {
@@ -238,6 +237,7 @@ pub fn next(self: *Tokenizer) Token {
                     break;
                 },
             },
+
             .new_line => switch (c) {
                 '\n' => {
                     result.id = .new_line;
@@ -246,6 +246,7 @@ pub fn next(self: *Tokenizer) Token {
                 },
                 else => {}, // TODO this should be an error condition
             },
+
             .hyphen => |*count| switch (c) {
                 ' ' => {
                     result.id = .seq_item_ind;
@@ -265,6 +266,7 @@ pub fn next(self: *Tokenizer) Token {
                     state = .literal;
                 },
             },
+
             .dot => |*count| switch (c) {
                 '.' => {
                     count.* += 1;
@@ -279,6 +281,7 @@ pub fn next(self: *Tokenizer) Token {
                     state = .literal;
                 },
             },
+
             .single_quote_or_escape => switch (c) {
                 '\'' => {
                     result.id = .escape_seq;
@@ -291,6 +294,7 @@ pub fn next(self: *Tokenizer) Token {
                     break;
                 },
             },
+
             .literal => switch (c) {
                 '\\' => {
                     result.id = .literal;
@@ -307,6 +311,7 @@ pub fn next(self: *Tokenizer) Token {
                     result.id = .literal;
                 },
             },
+
             .escape_seq => {
                 // Only support single character escape codes for now...
                 result.id = .escape_seq;
