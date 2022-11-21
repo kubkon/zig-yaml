@@ -84,6 +84,16 @@ pub const TokenIterator = struct {
     }
 };
 
+fn matchesPattern(self: Tokenizer, comptime pattern: []const u8) bool {
+    comptime var count: usize = 0;
+    inline while (count < pattern.len) : (count += 1) {
+        if (self.index + count >= self.buffer.len) return false;
+        const c = self.buffer[self.index + count];
+        if (pattern[count] != c) return false;
+    }
+    return true;
+}
+
 pub fn next(self: *Tokenizer) Token {
     var result = Token{
         .id = .eof,
@@ -97,8 +107,6 @@ pub fn next(self: *Tokenizer) Token {
         space,
         tab,
         comment,
-        hyphen: usize,
-        dot: usize,
         single_quote_or_escape,
         literal,
         escape_seq,
@@ -122,12 +130,27 @@ pub fn next(self: *Tokenizer) Token {
                 '\r' => {
                     state = .new_line;
                 },
-                '-' => {
-                    state = .{ .hyphen = 1 };
+
+                '-' => if (self.matchesPattern("---")) {
+                    result.id = .doc_start;
+                    self.index += "---".len;
+                    break;
+                } else if (self.matchesPattern("- ")) {
+                    result.id = .seq_item_ind;
+                    self.index += "- ".len;
+                    break;
+                } else {
+                    state = .literal;
                 },
-                '.' => {
-                    state = .{ .dot = 1 };
+
+                '.' => if (self.matchesPattern("...")) {
+                    result.id = .doc_end;
+                    self.index += "...".len;
+                    break;
+                } else {
+                    state = .literal;
                 },
+
                 ',' => {
                     result.id = .comma;
                     self.index += 1;
@@ -245,41 +268,6 @@ pub fn next(self: *Tokenizer) Token {
                     break;
                 },
                 else => {}, // TODO this should be an error condition
-            },
-
-            .hyphen => |*count| switch (c) {
-                ' ' => {
-                    result.id = .seq_item_ind;
-                    self.index += 1;
-                    break;
-                },
-                '-' => {
-                    count.* += 1;
-
-                    if (count.* == 3) {
-                        result.id = .doc_start;
-                        self.index += 1;
-                        break;
-                    }
-                },
-                else => {
-                    state = .literal;
-                },
-            },
-
-            .dot => |*count| switch (c) {
-                '.' => {
-                    count.* += 1;
-
-                    if (count.* == 3) {
-                        result.id = .doc_end;
-                        self.index += 1;
-                        break;
-                    }
-                },
-                else => {
-                    state = .literal;
-                },
             },
 
             .single_quote_or_escape => switch (c) {
