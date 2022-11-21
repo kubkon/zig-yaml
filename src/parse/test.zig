@@ -756,3 +756,9 @@ test "comment within a bracketed list is an error" {
         \\]
     , error.MalformedYaml);
 }
+
+test "mixed ints with floats in a list" {
+    try parseSuccess(
+        \\[0, 1.0]
+    );
+}

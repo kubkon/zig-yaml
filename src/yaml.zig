@@ -80,7 +80,7 @@ pub const Value = union(ValueType) {
                 if (len == 0) return;
 
                 const first = list[0];
-                if (first.is_compound()) {
+                if (first.isCompound()) {
                     for (list) |elem, i| {
                         try writer.writeByteNTimes(' ', args.indentation);
                         try writer.writeAll("- ");
@@ -117,8 +117,8 @@ pub const Value = union(ValueType) {
 
                     const value = map.get(key) orelse unreachable;
                     const should_inline = blk: {
-                        if (!value.is_compound()) break :blk true;
-                        if (value == .list and value.list.len > 0 and !value.list[0].is_compound()) break :blk true;
+                        if (!value.isCompound()) break :blk true;
+                        if (value == .list and value.list.len > 0 and !value.list[0].isCompound()) break :blk true;
                         break :blk false;
                     };
 
@@ -139,20 +139,20 @@ pub const Value = union(ValueType) {
         }
     }
 
-    fn is_compound(self: Value) bool {
+    fn isCompound(self: Value) bool {
         return switch (self) {
             .list, .map => true,
             else => false,
         };
     }
 
-    fn fromNode(arena: Allocator, tree: *const Tree, node: *const Node, type_hint: ?ValueType) YamlError!Value {
+    fn fromNode(arena: Allocator, tree: *const Tree, node: *const Node) YamlError!Value {
         if (node.cast(Node.Doc)) |doc| {
             const inner = doc.value orelse {
                 // empty doc
                 return Value{ .empty = {} };
             };
-            return Value.fromNode(arena, tree, inner, null);
+            return Value.fromNode(arena, tree, inner);
         } else if (node.cast(Node.Map)) |map| {
             var out_map = std.StringArrayHashMap(Value).init(arena);
             try out_map.ensureUnusedCapacity(map.values.items.len);
@@ -160,7 +160,7 @@ pub const Value = union(ValueType) {
             for (map.values.items) |entry| {
                 const key = try arena.dupe(u8, tree.getRaw(entry.key, entry.key));
                 const value = if (entry.value) |value|
-                    try Value.fromNode(arena, tree, value, null)
+                    try Value.fromNode(arena, tree, value)
                 else
                     .empty;
                 out_map.putAssumeCapacityNoClobber(key, value);
@@ -172,19 +172,8 @@ pub const Value = union(ValueType) {
             try out_list.ensureUnusedCapacity(list.values.items.len);
 
             if (list.values.items.len > 0) {
-                const hint = if (list.values.items[0].cast(Node.Value)) |value| hint: {
-                    const raw = tree.getRaw(value.base.start, value.base.end);
-                    _ = std.fmt.parseInt(i64, raw, 10) catch {
-                        _ = std.fmt.parseFloat(f64, raw) catch {
-                            break :hint ValueType.string;
-                        };
-                        break :hint ValueType.float;
-                    };
-                    break :hint ValueType.int;
-                } else null;
-
                 for (list.values.items) |elem| {
-                    const value = try Value.fromNode(arena, tree, elem, hint);
+                    const value = try Value.fromNode(arena, tree, elem);
                     out_list.appendAssumeCapacity(value);
                 }
             }
@@ -193,25 +182,18 @@ pub const Value = union(ValueType) {
         } else if (node.cast(Node.Value)) |value| {
             const raw = tree.getRaw(node.start, node.end);
 
-            if (type_hint) |hint| {
-                return switch (hint) {
-                    .int => Value{ .int = try std.fmt.parseInt(i64, raw, 10) },
-                    .float => Value{ .float = try std.fmt.parseFloat(f64, raw) },
-                    .string => Value{ .string = try arena.dupe(u8, value.string_value.items) },
-                    else => unreachable,
-                };
-            }
-
             try_int: {
                 // TODO infer base for int
                 const int = std.fmt.parseInt(i64, raw, 10) catch break :try_int;
                 return Value{ .int = int };
             }
+
             try_float: {
                 const float = std.fmt.parseFloat(f64, raw) catch break :try_float;
                 return Value{ .float = float };
             }
-            return Value{ .string = try arena.dupe(u8, raw) };
+
+            return Value{ .string = try arena.dupe(u8, value.string_value.items) };
         } else {
             log.err("Unexpected node type: {}", .{node.tag});
             return error.UnexpectedNodeType;
@@ -253,7 +235,7 @@ pub const Yaml = struct {
         try docs.ensureUnusedCapacity(tree.docs.items.len);
 
         for (tree.docs.items) |node| {
-            const value = try Value.fromNode(arena.allocator(), &tree, node, null);
+            const value = try Value.fromNode(arena.allocator(), &tree, node);
             docs.appendAssumeCapacity(value);
         }
 
@@ -313,16 +295,18 @@ pub const Yaml = struct {
     fn parseValue(self: *Yaml, comptime T: type, value: Value) Error!T {
         return switch (@typeInfo(T)) {
             .Int => math.cast(T, try value.asInt()) orelse return error.Overflow,
-            .Float => math.lossyCast(T, try value.asFloat()),
+            .Float => if (value.asFloat()) |float| {
+                return math.lossyCast(T, float);
+            } else |_| {
+                return math.lossyCast(T, try value.asInt());
+            },
             .Struct => self.parseStruct(T, try value.asMap()),
             .Union => self.parseUnion(T, value),
             .Array => self.parseArray(T, try value.asList()),
-            .Pointer => {
-                if (value.asList()) |list| {
-                    return self.parsePointer(T, .{ .list = list });
-                } else |_| {
-                    return self.parsePointer(T, .{ .string = try value.asString() });
-                }
+            .Pointer => if (value.asList()) |list| {
+                return self.parsePointer(T, .{ .list = list });
+            } else |_| {
+                return self.parsePointer(T, .{ .string = try value.asString() });
             },
             .Void => error.TypeMismatch,
             .Optional => unreachable,
