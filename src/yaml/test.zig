@@ -19,9 +19,9 @@ test "simple list" {
     const list = yaml.docs.items[0].list;
     try testing.expectEqual(list.len, 3);
 
-    try testing.expect(mem.eql(u8, list[0].string, "a"));
-    try testing.expect(mem.eql(u8, list[1].string, "b"));
-    try testing.expect(mem.eql(u8, list[2].string, "c"));
+    try testing.expectEqualStrings("a", list[0].string);
+    try testing.expectEqualStrings("b", list[1].string);
+    try testing.expectEqualStrings("c", list[2].string);
 }
 
 test "simple list typed as array of strings" {
@@ -37,10 +37,10 @@ test "simple list typed as array of strings" {
     try testing.expectEqual(yaml.docs.items.len, 1);
 
     const arr = try yaml.parse([3][]const u8);
-    try testing.expectEqual(arr.len, 3);
-    try testing.expect(mem.eql(u8, arr[0], "a"));
-    try testing.expect(mem.eql(u8, arr[1], "b"));
-    try testing.expect(mem.eql(u8, arr[2], "c"));
+    try testing.expectEqual(3, arr.len);
+    try testing.expectEqualStrings("a", arr[0]);
+    try testing.expectEqualStrings("b", arr[1]);
+    try testing.expectEqualStrings("c", arr[2]);
 }
 
 test "simple list typed as array of ints" {
@@ -56,10 +56,7 @@ test "simple list typed as array of ints" {
     try testing.expectEqual(yaml.docs.items.len, 1);
 
     const arr = try yaml.parse([3]u8);
-    try testing.expectEqual(arr.len, 3);
-    try testing.expectEqual(arr[0], 0);
-    try testing.expectEqual(arr[1], 1);
-    try testing.expectEqual(arr[2], 2);
+    try testing.expectEqualSlices(u8, &[_]u8{ 0, 1, 2 }, &arr);
 }
 
 test "list of mixed sign integer" {
@@ -75,10 +72,7 @@ test "list of mixed sign integer" {
     try testing.expectEqual(yaml.docs.items.len, 1);
 
     const arr = try yaml.parse([3]i8);
-    try testing.expectEqual(arr.len, 3);
-    try testing.expectEqual(arr[0], 0);
-    try testing.expectEqual(arr[1], -1);
-    try testing.expectEqual(arr[2], 2);
+    try testing.expectEqualSlices(i8, &[_]i8{ 0, -1, 2 }, &arr);
 }
 
 test "simple map untyped" {
@@ -93,7 +87,7 @@ test "simple map untyped" {
 
     const map = yaml.docs.items[0].map;
     try testing.expect(map.contains("a"));
-    try testing.expectEqual(map.get("a").?.int, 0);
+    try testing.expectEqual(@as(i64, 0), map.get("a").?.int);
 }
 
 test "simple map untyped with a list of maps" {
@@ -116,12 +110,12 @@ test "simple map untyped with a list of maps" {
     try testing.expect(map.contains("a"));
     try testing.expect(map.contains("b"));
     try testing.expect(map.contains("c"));
-    try testing.expectEqual(map.get("a").?.int, 0);
-    try testing.expectEqual(map.get("c").?.int, 1);
-    try testing.expectEqual(map.get("b").?.list[0].map.get("foo").?.int, 1);
-    try testing.expectEqual(map.get("b").?.list[0].map.get("bar").?.int, 2);
-    try testing.expectEqual(map.get("b").?.list[1].map.get("foo").?.int, 3);
-    try testing.expectEqual(map.get("b").?.list[1].map.get("bar").?.int, 4);
+    try testing.expectEqual(@as(i64, 0), map.get("a").?.int);
+    try testing.expectEqual(@as(i64, 1), map.get("c").?.int);
+    try testing.expectEqual(@as(i64, 1), map.get("b").?.list[0].map.get("foo").?.int);
+    try testing.expectEqual(@as(i64, 2), map.get("b").?.list[0].map.get("bar").?.int);
+    try testing.expectEqual(@as(i64, 3), map.get("b").?.list[1].map.get("foo").?.int);
+    try testing.expectEqual(@as(i64, 4), map.get("b").?.list[1].map.get("bar").?.int);
 }
 
 test "simple map untyped with a list of maps. no indent" {
@@ -139,8 +133,8 @@ test "simple map untyped with a list of maps. no indent" {
     const map = yaml.docs.items[0].map;
     try testing.expect(map.contains("b"));
     try testing.expect(map.contains("c"));
-    try testing.expectEqual(map.get("c").?.int, 1);
-    try testing.expectEqual(map.get("b").?.list[0].map.get("foo").?.int, 1);
+    try testing.expectEqual(@as(i64, 1), map.get("c").?.int);
+    try testing.expectEqual(@as(i64, 1), map.get("b").?.list[0].map.get("foo").?.int);
 }
 
 test "simple map untyped with a list of maps. no indent 2" {
@@ -163,12 +157,12 @@ test "simple map untyped with a list of maps. no indent 2" {
     try testing.expect(map.contains("a"));
     try testing.expect(map.contains("b"));
     try testing.expect(map.contains("c"));
-    try testing.expectEqual(map.get("a").?.int, 0);
-    try testing.expectEqual(map.get("c").?.int, 1);
-    try testing.expectEqual(map.get("b").?.list[0].map.get("foo").?.int, 1);
-    try testing.expectEqual(map.get("b").?.list[0].map.get("bar").?.int, 2);
-    try testing.expectEqual(map.get("b").?.list[1].map.get("foo").?.int, 3);
-    try testing.expectEqual(map.get("b").?.list[1].map.get("bar").?.int, 4);
+    try testing.expectEqual(@as(i64, 0), map.get("a").?.int);
+    try testing.expectEqual(@as(i64, 1), map.get("c").?.int);
+    try testing.expectEqual(@as(i64, 1), map.get("b").?.list[0].map.get("foo").?.int);
+    try testing.expectEqual(@as(i64, 2), map.get("b").?.list[0].map.get("bar").?.int);
+    try testing.expectEqual(@as(i64, 3), map.get("b").?.list[1].map.get("foo").?.int);
+    try testing.expectEqual(@as(i64, 4), map.get("b").?.list[1].map.get("bar").?.int);
 }
 
 test "simple map typed" {
@@ -182,9 +176,9 @@ test "simple map typed" {
     defer yaml.deinit();
 
     const simple = try yaml.parse(struct { a: usize, b: []const u8, c: []const u8 });
-    try testing.expectEqual(simple.a, 0);
-    try testing.expect(mem.eql(u8, simple.b, "hello there"));
-    try testing.expect(mem.eql(u8, simple.c, "wait, what?"));
+    try testing.expectEqual(@as(usize, 0), simple.a);
+    try testing.expectEqualStrings("hello there", simple.b);
+    try testing.expectEqualStrings("wait, what?", simple.c);
 }
 
 test "typed nested structs" {
@@ -203,8 +197,8 @@ test "typed nested structs" {
             c: []const u8,
         },
     });
-    try testing.expect(mem.eql(u8, simple.a.b, "hello there"));
-    try testing.expect(mem.eql(u8, simple.a.c, "wait, what?"));
+    try testing.expectEqualStrings("hello there", simple.a.b);
+    try testing.expectEqualStrings("wait, what?", simple.a.c);
 }
 
 test "single quoted string" {
@@ -219,9 +213,9 @@ test "single quoted string" {
 
     const arr = try yaml.parse([3][]const u8);
     try testing.expectEqual(arr.len, 3);
-    try testing.expect(mem.eql(u8, arr[0], "hello"));
-    try testing.expect(mem.eql(u8, arr[1], "here's an escaped quote"));
-    try testing.expect(mem.eql(u8, arr[2], "newlines and tabs\\nare not\\tsupported"));
+    try testing.expectEqualStrings("hello", arr[0]);
+    try testing.expectEqualStrings("here's an escaped quote", arr[1]);
+    try testing.expectEqualStrings("newlines and tabs\\nare not\\tsupported", arr[2]);
 }
 
 test "double quoted string" {
@@ -236,14 +230,14 @@ test "double quoted string" {
 
     const arr = try yaml.parse([3][]const u8);
     try testing.expectEqual(arr.len, 3);
-    try testing.expect(mem.eql(u8, arr[0], "hello"));
-    try testing.expect(mem.eql(u8, arr[1],
+    try testing.expectEqualStrings("hello", arr[0]);
+    try testing.expectEqualStrings(
         \\"here" are some escaped quotes
-    ));
-    try testing.expect(mem.eql(u8, arr[2],
+    , arr[1]);
+    try testing.expectEqualStrings(
         \\newlines and tabs
         \\are	supported
-    ));
+    , arr[2]);
 }
 
 test "multidoc typed as a slice of structs" {
@@ -314,7 +308,7 @@ test "multidoc typed as a slice of structs with optionals" {
 
     try testing.expectEqual(result[1].a, 1);
     try testing.expect(result[1].b != null);
-    try testing.expect(mem.eql(u8, result[1].b.?, "different field"));
+    try testing.expectEqualStrings("different field", result[1].b.?);
     try testing.expect(result[1].c == null);
 }
 
@@ -369,6 +363,6 @@ test "comments" {
         key: []const []const u8,
     });
     try testing.expect(simple.key.len == 2);
-    try testing.expect(mem.eql(u8, simple.key[0], "val1"));
-    try testing.expect(mem.eql(u8, simple.key[1], "val2"));
+    try testing.expectEqualStrings("val1", simple.key[0]);
+    try testing.expectEqualStrings("val2", simple.key[1]);
 }
