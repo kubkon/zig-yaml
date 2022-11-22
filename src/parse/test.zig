@@ -618,11 +618,11 @@ test "doc with two string is bad" {
     , error.UnexpectedToken);
 }
 
-test "single quote string cannot have new lines" {
-    try parseError(
+test "single quote string can have new lines" {
+    try parseSuccess(
         \\'what is this
         \\ thing?'
-    , error.UnexpectedToken);
+    );
 }
 
 test "single quote string on one line is fine" {
@@ -631,11 +631,11 @@ test "single quote string on one line is fine" {
     );
 }
 
-test "double quote string cannot have new lines" {
-    try parseError(
+test "double quote string can have new lines" {
+    try parseSuccess(
         \\"what is this
         \\ thing?"
-    , error.UnexpectedToken);
+    );
 }
 
 test "double quote string on one line is fine" {

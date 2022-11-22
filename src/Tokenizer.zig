@@ -76,14 +76,18 @@ pub const TokenIterator = struct {
     }
 };
 
-fn matchesPattern(self: Tokenizer, comptime pattern: []const u8) bool {
+fn stringMatchesPattern(comptime pattern: []const u8, slice: []const u8) bool {
     comptime var count: usize = 0;
     inline while (count < pattern.len) : (count += 1) {
-        if (self.index + count >= self.buffer.len) return false;
-        const c = self.buffer[self.index + count];
+        if (count >= slice.len) return false;
+        const c = slice[count];
         if (pattern[count] != c) return false;
     }
     return true;
+}
+
+fn matchesPattern(self: Tokenizer, comptime pattern: []const u8) bool {
+    return stringMatchesPattern(pattern, self.buffer[self.index..]);
 }
 
 pub fn next(self: *Tokenizer) Token {
@@ -248,9 +252,13 @@ pub fn next(self: *Tokenizer) Token {
 
             .double_quoted => switch (c) {
                 '"' => {
-                    result.id = .double_quoted;
-                    self.index += 1;
-                    break;
+                    if (stringMatchesPattern("\\", self.buffer[self.index - 1 ..])) {
+                        self.index += 1;
+                    } else {
+                        result.id = .double_quoted;
+                        self.index += 1;
+                        break;
+                    }
                 },
                 else => {},
             },
@@ -490,11 +498,17 @@ test "escape sequences" {
     try testExpected(
         \\a: 'here''s an apostrophe'
         \\b: "a newline\nand a\ttab"
+        \\c: "\"here\" and there"
     , &[_]Token.Id{
         .literal,
         .map_value_ind,
         .space,
         .single_quoted,
+        .new_line,
+        .literal,
+        .map_value_ind,
+        .space,
+        .double_quoted,
         .new_line,
         .literal,
         .map_value_ind,
