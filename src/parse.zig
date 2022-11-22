@@ -10,6 +10,7 @@ const TokenIndex = Tokenizer.TokenIndex;
 const TokenIterator = Tokenizer.TokenIterator;
 
 pub const ParseError = error{
+    InvalidEscapeSequence,
     MalformedYaml,
     NestedDocuments,
     UnexpectedEof,
@@ -334,7 +335,7 @@ const Parser = struct {
                 self.token_it.seekTo(pos);
                 return self.leaf_value();
             },
-            .single_quote, .double_quote => {
+            .single_quoted, .double_quoted => {
                 // leaf value
                 self.token_it.seekBy(-1);
                 return self.leaf_value();
@@ -562,83 +563,41 @@ const Parser = struct {
         node.base.start = self.token_it.pos;
         errdefer node.string_value.deinit(self.allocator);
 
-        parse: {
-            if (self.eatToken(.single_quote, &.{})) |_| {
-                node.base.start = node.base.start + 1;
-                while (self.token_it.next()) |tok| {
-                    switch (tok.id) {
-                        .single_quote => {
-                            node.base.end = self.token_it.pos - 2;
-                            break :parse;
-                        },
-                        .new_line => return error.UnexpectedToken,
-                        .escape_seq => {
-                            const ch = self.tree.source[tok.start + 1];
-                            try node.string_value.append(self.allocator, ch);
-                        },
-                        else => {
-                            const str = self.tree.source[tok.start..tok.end];
-                            try node.string_value.appendSlice(self.allocator, str);
-                        },
-                    }
-                }
-            }
-
-            if (self.eatToken(.double_quote, &.{})) |_| {
-                node.base.start = node.base.start + 1;
-                while (self.token_it.next()) |tok| {
-                    switch (tok.id) {
-                        .double_quote => {
-                            node.base.end = self.token_it.pos - 2;
-                            break :parse;
-                        },
-                        .new_line => return error.UnexpectedToken,
-                        .escape_seq => {
-                            switch (self.tree.source[tok.start + 1]) {
-                                'n' => {
-                                    try node.string_value.append(self.allocator, '\n');
-                                },
-                                't' => {
-                                    try node.string_value.append(self.allocator, '\t');
-                                },
-                                '"' => {
-                                    try node.string_value.append(self.allocator, '"');
-                                },
-                                else => {},
-                            }
-                        },
-                        else => {
-                            const str = self.tree.source[tok.start..tok.end];
-                            try node.string_value.appendSlice(self.allocator, str);
-                        },
-                    }
-                }
-            }
-
-            // TODO handle multiline strings in new block scope
-            while (self.token_it.next()) |tok| {
-                switch (tok.id) {
-                    .literal => {},
-                    .space => {
-                        const trailing = self.token_it.pos - 2;
-                        self.eatCommentsAndSpace(&.{});
-                        if (self.token_it.peek()) |peek| {
-                            if (peek.id != .literal) {
-                                node.base.end = trailing;
-                                const raw = self.tree.getRaw(node.base.start, node.base.end);
-                                try node.string_value.appendSlice(self.allocator, raw);
-                                break;
-                            }
+        // TODO handle multiline strings in new block scope
+        while (self.token_it.next()) |tok| {
+            switch (tok.id) {
+                .single_quoted => {
+                    node.base.end = self.token_it.pos - 1;
+                    const raw = self.tree.getRaw(node.base.start, node.base.end);
+                    try self.parseSingleQuoted(node, raw);
+                    break;
+                },
+                .double_quoted => {
+                    node.base.end = self.token_it.pos - 1;
+                    const raw = self.tree.getRaw(node.base.start, node.base.end);
+                    try self.parseDoubleQuoted(node, raw);
+                    break;
+                },
+                .literal => {},
+                .space => {
+                    const trailing = self.token_it.pos - 2;
+                    self.eatCommentsAndSpace(&.{});
+                    if (self.token_it.peek()) |peek| {
+                        if (peek.id != .literal) {
+                            node.base.end = trailing;
+                            const raw = self.tree.getRaw(node.base.start, node.base.end);
+                            try node.string_value.appendSlice(self.allocator, raw);
+                            break;
                         }
-                    },
-                    else => {
-                        self.token_it.seekBy(-1);
-                        node.base.end = self.token_it.pos - 1;
-                        const raw = self.tree.getRaw(node.base.start, node.base.end);
-                        try node.string_value.appendSlice(self.allocator, raw);
-                        break;
-                    },
-                }
+                    }
+                },
+                else => {
+                    self.token_it.seekBy(-1);
+                    node.base.end = self.token_it.pos - 1;
+                    const raw = self.tree.getRaw(node.base.start, node.base.end);
+                    try node.string_value.appendSlice(self.allocator, raw);
+                    break;
+                },
             }
         }
 
@@ -694,6 +653,82 @@ const Parser = struct {
 
     fn getCol(self: *Parser, index: TokenIndex) usize {
         return self.line_cols.get(index).?.col;
+    }
+
+    fn parseSingleQuoted(self: *Parser, node: *Node.Value, raw: []const u8) ParseError!void {
+        assert(raw[0] == '\'' and raw[raw.len - 1] == '\'');
+
+        const raw_no_quotes = raw[1 .. raw.len - 1];
+        try node.string_value.ensureTotalCapacity(self.allocator, raw_no_quotes.len);
+
+        var state: enum {
+            start,
+            escape,
+        } = .start;
+        var index: usize = 0;
+
+        while (index < raw_no_quotes.len) : (index += 1) {
+            const c = raw_no_quotes[index];
+            switch (state) {
+                .start => switch (c) {
+                    '\'' => {
+                        state = .escape;
+                    },
+                    else => {
+                        node.string_value.appendAssumeCapacity(c);
+                    },
+                },
+                .escape => switch (c) {
+                    '\'' => {
+                        state = .start;
+                        node.string_value.appendAssumeCapacity(c);
+                    },
+                    else => return error.InvalidEscapeSequence,
+                },
+            }
+        }
+    }
+
+    fn parseDoubleQuoted(self: *Parser, node: *Node.Value, raw: []const u8) ParseError!void {
+        assert(raw[0] == '"' and raw[raw.len - 1] == '"');
+
+        const raw_no_quotes = raw[1 .. raw.len - 1];
+        try node.string_value.ensureTotalCapacity(self.allocator, raw_no_quotes.len);
+
+        var state: enum {
+            start,
+            escape,
+        } = .start;
+
+        var index: usize = 0;
+        while (index < raw_no_quotes.len) : (index += 1) {
+            const c = raw_no_quotes[index];
+            switch (state) {
+                .start => switch (c) {
+                    '\\' => {
+                        state = .escape;
+                    },
+                    else => {
+                        node.string_value.appendAssumeCapacity(c);
+                    },
+                },
+                .escape => switch (c) {
+                    'n' => {
+                        state = .start;
+                        node.string_value.appendAssumeCapacity('\n');
+                    },
+                    't' => {
+                        state = .start;
+                        node.string_value.appendAssumeCapacity('\t');
+                    },
+                    '"' => {
+                        state = .start;
+                        node.string_value.appendAssumeCapacity('"');
+                    },
+                    else => return error.InvalidEscapeSequence,
+                },
+            }
+        }
     }
 };
 

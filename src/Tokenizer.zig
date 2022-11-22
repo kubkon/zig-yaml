@@ -6,13 +6,6 @@ const testing = std.testing;
 
 buffer: []const u8,
 index: usize = 0,
-string_type: StringType = .unquoted,
-
-const StringType = enum {
-    unquoted,
-    single_quoted,
-    double_quoted,
-};
 
 pub const Token = struct {
     id: Id,
@@ -40,10 +33,9 @@ pub const Token = struct {
         alias,          // *
         anchor,         // &
         tag,            // !
-        single_quote,   // '
-        double_quote,   // "
-        escape_seq,     // '' for single quoted strings, starts with \ for double quoted strings
 
+        single_quoted,   // '...'
+        double_quoted,   // "..."
         literal,
         // zig fmt: on
     };
@@ -84,14 +76,18 @@ pub const TokenIterator = struct {
     }
 };
 
-fn matchesPattern(self: Tokenizer, comptime pattern: []const u8) bool {
+fn stringMatchesPattern(comptime pattern: []const u8, slice: []const u8) bool {
     comptime var count: usize = 0;
     inline while (count < pattern.len) : (count += 1) {
-        if (self.index + count >= self.buffer.len) return false;
-        const c = self.buffer[self.index + count];
+        if (count >= slice.len) return false;
+        const c = slice[count];
         if (pattern[count] != c) return false;
     }
     return true;
+}
+
+fn matchesPattern(self: Tokenizer, comptime pattern: []const u8) bool {
+    return stringMatchesPattern(pattern, self.buffer[self.index..]);
 }
 
 pub fn next(self: *Tokenizer) Token {
@@ -101,15 +97,15 @@ pub fn next(self: *Tokenizer) Token {
         .end = undefined,
     };
 
-    var state: union(enum) {
+    var state: enum {
         start,
         new_line,
         space,
         tab,
         comment,
-        single_quote_or_escape,
+        single_quoted,
+        double_quoted,
         literal,
-        escape_seq,
     } = .start;
 
     while (self.index < self.buffer.len) : (self.index += 1) {
@@ -174,34 +170,6 @@ pub fn next(self: *Tokenizer) Token {
                     self.index += 1;
                     break;
                 },
-                '\'' => switch (self.string_type) {
-                    .unquoted => {
-                        result.id = .single_quote;
-                        self.string_type = if (self.string_type == .single_quoted)
-                            .unquoted
-                        else
-                            .single_quoted;
-                        self.index += 1;
-                        break;
-                    },
-                    .single_quoted => {
-                        state = .single_quote_or_escape;
-                    },
-                    .double_quoted => {
-                        result.id = .single_quote;
-                        self.index += 1;
-                        break;
-                    },
-                },
-                '"' => {
-                    result.id = .double_quote;
-                    self.string_type = if (self.string_type == .double_quoted)
-                        .unquoted
-                    else
-                        .double_quoted;
-                    self.index += 1;
-                    break;
-                },
                 '[' => {
                     result.id = .flow_seq_start;
                     self.index += 1;
@@ -227,10 +195,11 @@ pub fn next(self: *Tokenizer) Token {
                     self.index += 1;
                     break;
                 },
-                '\\' => if (self.string_type == .double_quoted) {
-                    state = .escape_seq;
-                } else {
-                    state = .literal;
+                '\'' => {
+                    state = .single_quoted;
+                },
+                '"' => {
+                    state = .double_quoted;
                 },
                 else => {
                     state = .literal;
@@ -270,27 +239,31 @@ pub fn next(self: *Tokenizer) Token {
                 else => {}, // TODO this should be an error condition
             },
 
-            .single_quote_or_escape => switch (c) {
-                '\'' => {
-                    result.id = .escape_seq;
+            .single_quoted => switch (c) {
+                '\'' => if (!self.matchesPattern("''")) {
+                    result.id = .single_quoted;
                     self.index += 1;
                     break;
+                } else {
+                    self.index += "''".len - 1;
                 },
-                else => {
-                    self.string_type = .unquoted;
-                    result.id = .single_quote;
-                    break;
-                },
+                else => {},
             },
 
-            .literal => switch (c) {
-                '\\' => {
-                    result.id = .literal;
-                    if (self.string_type == .double_quoted) {
-                        // escape sequence
+            .double_quoted => switch (c) {
+                '"' => {
+                    if (stringMatchesPattern("\\", self.buffer[self.index - 1 ..])) {
+                        self.index += 1;
+                    } else {
+                        result.id = .double_quoted;
+                        self.index += 1;
                         break;
                     }
                 },
+                else => {},
+            },
+
+            .literal => switch (c) {
                 '\r', '\n', ' ', '\'', '"', ',', ':', ']', '}' => {
                     result.id = .literal;
                     break;
@@ -299,13 +272,6 @@ pub fn next(self: *Tokenizer) Token {
                     result.id = .literal;
                 },
             },
-
-            .escape_seq => {
-                // Only support single character escape codes for now...
-                result.id = .escape_seq;
-                self.index += 1;
-                break;
-            },
         }
     }
 
@@ -313,9 +279,6 @@ pub fn next(self: *Tokenizer) Token {
         switch (state) {
             .literal => {
                 result.id = .literal;
-            },
-            .single_quote_or_escape => {
-                result.id = .single_quote;
             },
             else => {},
         }
@@ -334,18 +297,16 @@ fn testExpected(source: []const u8, expected: []const Token.Id) !void {
         .buffer = source,
     };
 
-    var token_len: usize = 0;
-    for (expected) |exp| {
-        token_len += 1;
+    var given = std.ArrayList(Token.Id).init(testing.allocator);
+    defer given.deinit();
+
+    while (true) {
         const token = tokenizer.next();
-        try testing.expectEqual(exp, token.id);
+        try given.append(token.id);
+        if (token.id == .eof) break;
     }
 
-    while (tokenizer.next().id != .eof) {
-        token_len += 1; // consume all tokens
-    }
-
-    try testing.expectEqual(expected.len, token_len);
+    try testing.expectEqualSlices(Token.Id, expected, given.items);
 }
 
 test {
@@ -503,9 +464,7 @@ test "part of tbd" {
         .literal,
         .map_value_ind,
         .space,
-        .single_quote,
-        .literal,
-        .single_quote,
+        .single_quoted,
         .new_line,
         .doc_end,
         .eof,
@@ -531,6 +490,7 @@ test "Unindented list" {
         .map_value_ind,
         .space,
         .literal,
+        .eof,
     });
 }
 
@@ -538,34 +498,22 @@ test "escape sequences" {
     try testExpected(
         \\a: 'here''s an apostrophe'
         \\b: "a newline\nand a\ttab"
+        \\c: "\"here\" and there"
     , &[_]Token.Id{
         .literal,
         .map_value_ind,
         .space,
-        .single_quote,
-        .literal,
-        .escape_seq,
-        .literal,
-        .space,
-        .literal,
-        .space,
-        .literal,
-        .single_quote,
+        .single_quoted,
         .new_line,
         .literal,
         .map_value_ind,
         .space,
-        .double_quote,
+        .double_quoted,
+        .new_line,
         .literal,
+        .map_value_ind,
         .space,
-        .literal,
-        .escape_seq,
-        .literal,
-        .space,
-        .literal,
-        .escape_seq,
-        .literal,
-        .double_quote,
+        .double_quoted,
         .eof,
     });
 }
@@ -592,6 +540,21 @@ test "comments" {
         .new_line,
         .seq_item_ind,
         .literal,
+        .eof,
+    });
+}
+
+test "quoted literals" {
+    try testExpected(
+        \\'#000000'
+        \\'[000000'
+        \\"&someString"
+    , &[_]Token.Id{
+        .single_quoted,
+        .new_line,
+        .single_quoted,
+        .new_line,
+        .double_quoted,
         .eof,
     });
 }
