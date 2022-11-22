@@ -223,6 +223,7 @@ pub const Yaml = struct {
 
     pub fn load(allocator: Allocator, source: []const u8) !Yaml {
         var arena = ArenaAllocator.init(allocator);
+        errdefer arena.deinit();
 
         var tree = Tree.init(arena.allocator());
         try tree.parse(source);
