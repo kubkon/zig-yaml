@@ -223,13 +223,15 @@ test "double quoted string" {
         \\- "hello"
         \\- "\"here\" are some escaped quotes"
         \\- "newlines and tabs\nare\tsupported"
+        \\- "let's have
+        \\some fun!"
     ;
 
     var yaml = try Yaml.load(testing.allocator, source);
     defer yaml.deinit();
 
-    const arr = try yaml.parse([3][]const u8);
-    try testing.expectEqual(arr.len, 3);
+    const arr = try yaml.parse([4][]const u8);
+    try testing.expectEqual(arr.len, 4);
     try testing.expectEqualStrings("hello", arr[0]);
     try testing.expectEqualStrings(
         \\"here" are some escaped quotes
@@ -238,6 +240,10 @@ test "double quoted string" {
         \\newlines and tabs
         \\are	supported
     , arr[2]);
+    try testing.expectEqualStrings(
+        \\let's have
+        \\some fun!
+    , arr[3]);
 }
 
 test "multidoc typed as a slice of structs" {
