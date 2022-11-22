@@ -209,16 +209,14 @@ pub const Yaml = struct {
     }
 
     pub fn stringify(self: Yaml, writer: anytype) !void {
-        for (self.docs.items) |doc| {
-            // if (doc.directive) |directive| {
-            //     try writer.print("--- !{s}\n", .{directive});
-            // }
-            try writer.writeAll("---\n");
+        for (self.docs.items) |doc, i| {
+            try writer.writeAll("---");
+            if (self.tree.?.getDirective(i)) |directive| {
+                try writer.print(" !{s}", .{directive});
+            }
+            try writer.writeByte('\n');
             try doc.stringify(writer, .{});
             try writer.writeByte('\n');
-            // if (doc.directive != null) {
-            //     try writer.writeAll("...\n");
-            // }
         }
         try writer.writeAll("...\n");
     }
@@ -230,7 +228,7 @@ pub const Yaml = struct {
         try tree.parse(source);
 
         var docs = std.ArrayList(Value).init(arena.allocator());
-        try docs.ensureUnusedCapacity(tree.docs.items.len);
+        try docs.ensureTotalCapacityPrecise(tree.docs.items.len);
 
         for (tree.docs.items) |node| {
             const value = try Value.fromNode(arena.allocator(), &tree, node);

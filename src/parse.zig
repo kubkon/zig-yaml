@@ -244,6 +244,13 @@ pub const Tree = struct {
         self.docs.deinit(self.allocator);
     }
 
+    pub fn getDirective(self: Tree, doc_index: usize) ?[]const u8 {
+        assert(doc_index < self.docs.items.len);
+        const doc = self.docs.items[doc_index].cast(Node.Doc) orelse return null;
+        const id = doc.directive orelse return null;
+        return self.getRaw(id, id);
+    }
+
     pub fn getRaw(self: Tree, start: TokenIndex, end: TokenIndex) []const u8 {
         assert(start <= end);
         assert(start < self.tokens.len and end < self.tokens.len);

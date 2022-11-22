@@ -326,6 +326,21 @@ test "empty doc with explicit markers" {
     });
 }
 
+test "empty doc with explicit markers and a directive" {
+    try testExpected(
+        \\--- !tbd-v1
+        \\...
+    , &[_]Token.Id{
+        .doc_start,
+        .space,
+        .tag,
+        .literal,
+        .new_line,
+        .doc_end,
+        .eof,
+    });
+}
+
 test "sequence of values" {
     try testExpected(
         \\- 0
