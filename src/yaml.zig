@@ -20,19 +20,10 @@ pub const YamlError = error{
     OutOfMemory,
 } || ParseError || std.fmt.ParseIntError;
 
-pub const ValueType = enum {
-    empty,
-    int,
-    float,
-    string,
-    list,
-    map,
-};
-
 pub const List = []Value;
 pub const Map = std.StringHashMap(Value);
 
-pub const Value = union(ValueType) {
+pub const Value = union(enum) {
     empty,
     int: i64,
     float: f64,
