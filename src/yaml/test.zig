@@ -399,3 +399,11 @@ test "demoting floats to ints in a list is an error" {
         a_list: []const u64,
     }));
 }
+
+test "duplicate map keys" {
+    const source =
+        \\a: b
+        \\a: c
+    ;
+    try testing.expectError(error.DuplicateMapKey, Yaml.load(testing.allocator, source));
+}

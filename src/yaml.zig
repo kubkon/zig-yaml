@@ -16,6 +16,7 @@ const ParseError = parse.ParseError;
 
 pub const YamlError = error{
     UnexpectedNodeType,
+    DuplicateMapKey,
     OutOfMemory,
 } || ParseError || std.fmt.ParseIntError;
 
@@ -29,7 +30,7 @@ pub const ValueType = enum {
 };
 
 pub const List = []Value;
-pub const Map = std.StringArrayHashMap(Value);
+pub const Map = std.StringHashMap(Value);
 
 pub const Value = union(ValueType) {
     empty,
@@ -105,17 +106,20 @@ pub const Value = union(ValueType) {
                 try writer.writeAll(" ]");
             },
             .map => |map| {
-                const keys = map.keys();
-                const len = keys.len;
+                const len = map.count();
                 if (len == 0) return;
 
-                for (keys) |key, i| {
+                var i: usize = 0;
+                var it = map.iterator();
+                while (it.next()) |entry| {
+                    const key = entry.key_ptr.*;
+                    const value = entry.value_ptr.*;
+
                     if (!args.should_inline_first_key or i != 0) {
                         try writer.writeByteNTimes(' ', args.indentation);
                     }
                     try writer.print("{s}: ", .{key});
 
-                    const value = map.get(key) orelse unreachable;
                     const should_inline = blk: {
                         if (!value.isCompound()) break :blk true;
                         if (value == .list and value.list.len > 0 and !value.list[0].isCompound()) break :blk true;
@@ -134,6 +138,8 @@ pub const Value = union(ValueType) {
                     if (i < len - 1) {
                         try writer.writeByte('\n');
                     }
+
+                    i += 1;
                 }
             },
         }
@@ -154,16 +160,22 @@ pub const Value = union(ValueType) {
             };
             return Value.fromNode(arena, tree, inner);
         } else if (node.cast(Node.Map)) |map| {
-            var out_map = std.StringArrayHashMap(Value).init(arena);
-            try out_map.ensureUnusedCapacity(map.values.items.len);
+            // TODO use ContextAdapted HashMap and do not duplicate keys, intern
+            // in a contiguous string buffer.
+            var out_map = std.StringHashMap(Value).init(arena);
+            try out_map.ensureUnusedCapacity(math.cast(u32, map.values.items.len) orelse return error.Overflow);
 
             for (map.values.items) |entry| {
                 const key = try arena.dupe(u8, tree.getRaw(entry.key, entry.key));
+                const gop = out_map.getOrPutAssumeCapacity(key);
+                if (gop.found_existing) {
+                    return error.DuplicateMapKey;
+                }
                 const value = if (entry.value) |value|
                     try Value.fromNode(arena, tree, value)
                 else
                     .empty;
-                out_map.putAssumeCapacityNoClobber(key, value);
+                gop.value_ptr.* = value;
             }
 
             return Value{ .map = out_map };
