@@ -2,7 +2,8 @@ const std = @import("std");
 const mem = std.mem;
 const testing = std.testing;
 
-const Yaml = @import("../yaml.zig").Yaml;
+const yaml_mod = @import("../yaml.zig");
+const Yaml = yaml_mod.Yaml;
 
 test "simple list" {
     const source =
@@ -406,4 +407,24 @@ test "duplicate map keys" {
         \\a: c
     ;
     try testing.expectError(error.DuplicateMapKey, Yaml.load(testing.allocator, source));
+}
+
+fn testStringify(expected: []const u8, input: anytype) !void {
+    var output = std.ArrayList(u8).init(testing.allocator);
+    defer output.deinit();
+
+    try yaml_mod.stringify(testing.allocator, input, output.writer());
+    try testing.expectEqualStrings(expected, output.items);
+}
+
+test "stringify an int" {
+    try testStringify("128", @as(u32, 128));
+}
+
+test "stringify a simple struct" {
+    try testStringify(
+        \\a: 1
+        \\b: 2
+        \\c: 2.5
+    , struct { a: i64, b: f64, c: f64 }{ .a = 1, .b = 2.0, .c = 2.5 });
 }

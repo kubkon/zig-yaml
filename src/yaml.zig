@@ -200,6 +200,30 @@ pub const Value = union(enum) {
             return error.UnexpectedNodeType;
         }
     }
+
+    fn encode(arena: Allocator, input: anytype) YamlError!Value {
+        switch (@typeInfo(@TypeOf(input))) {
+            .Int => return Value{ .int = math.cast(i64, input) orelse return error.Overflow },
+
+            .Float => return Value{ .float = math.lossyCast(f64, input) },
+
+            .Struct => |struct_ti| {
+                var map = Map.init(arena);
+                errdefer map.deinit();
+                try map.ensureTotalCapacity(struct_ti.fields.len);
+
+                inline for (struct_ti.fields) |field| {
+                    const key = try arena.dupe(u8, field.name);
+                    const value = try encode(arena, @field(input, field.name));
+                    map.putAssumeCapacityNoClobber(key, value);
+                }
+
+                return Value{ .map = map };
+            },
+
+            else => return error.Unhandled,
+        }
+    }
 };
 
 pub const Yaml = struct {
@@ -209,19 +233,6 @@ pub const Yaml = struct {
 
     pub fn deinit(self: *Yaml) void {
         self.arena.deinit();
-    }
-
-    pub fn stringify(self: Yaml, writer: anytype) !void {
-        for (self.docs.items) |doc, i| {
-            try writer.writeAll("---");
-            if (self.tree.?.getDirective(i)) |directive| {
-                try writer.print(" !{s}", .{directive});
-            }
-            try writer.writeByte('\n');
-            try doc.stringify(writer, .{});
-            try writer.writeByte('\n');
-        }
-        try writer.writeAll("...\n");
     }
 
     pub fn load(allocator: Allocator, source: []const u8) !Yaml {
@@ -393,7 +404,31 @@ pub const Yaml = struct {
 
         return parsed;
     }
+
+    pub fn stringify(self: Yaml, writer: anytype) !void {
+        for (self.docs.items) |doc, i| {
+            try writer.writeAll("---");
+            if (self.tree.?.getDirective(i)) |directive| {
+                try writer.print(" !{s}", .{directive});
+            }
+            try writer.writeByte('\n');
+            try doc.stringify(writer, .{});
+            try writer.writeByte('\n');
+        }
+        try writer.writeAll("...\n");
+    }
 };
+
+pub fn stringify(allocator: Allocator, input: anytype, writer: anytype) !void {
+    var arena = ArenaAllocator.init(allocator);
+    defer arena.deinit();
+
+    var value = try Value.encode(arena.allocator(), input);
+
+    // TODO should we output as an explicit doc?
+    // How can allow the user to specify?
+    try value.stringify(writer, .{});
+}
 
 test {
     std.testing.refAllDecls(Tokenizer);
