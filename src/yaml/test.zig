@@ -428,3 +428,25 @@ test "stringify a simple struct" {
         \\c: 2.5
     , struct { a: i64, b: f64, c: f64 }{ .a = 1, .b = 2.0, .c = 2.5 });
 }
+
+test "stringify a struct with an optional" {
+    try testStringify(
+        \\a: 1
+        \\b: 2
+        \\c: 2.5
+    , struct { a: i64, b: ?f64, c: f64 }{ .a = 1, .b = 2.0, .c = 2.5 });
+
+    try testStringify(
+        \\a: 1
+        \\c: 2.5
+    , struct { a: i64, b: ?f64, c: f64 }{ .a = 1, .b = null, .c = 2.5 });
+}
+
+test "stringify a struct with all optionals" {
+    try testStringify("", struct { a: ?i64, b: ?f64 }{ .a = null, .b = null });
+}
+
+test "stringify an optional" {
+    try testStringify("", null);
+    try testStringify("", @as(?u64, null));
+}

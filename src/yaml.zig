@@ -201,7 +201,7 @@ pub const Value = union(enum) {
         }
     }
 
-    fn encode(arena: Allocator, input: anytype) YamlError!Value {
+    fn encode(arena: Allocator, input: anytype) YamlError!?Value {
         switch (@typeInfo(@TypeOf(input))) {
             .Int => return Value{ .int = math.cast(i64, input) orelse return error.Overflow },
 
@@ -213,15 +213,25 @@ pub const Value = union(enum) {
                 try map.ensureTotalCapacity(struct_ti.fields.len);
 
                 inline for (struct_ti.fields) |field| {
-                    const key = try arena.dupe(u8, field.name);
-                    const value = try encode(arena, @field(input, field.name));
-                    map.putAssumeCapacityNoClobber(key, value);
+                    if (try encode(arena, @field(input, field.name))) |value| {
+                        const key = try arena.dupe(u8, field.name);
+                        map.putAssumeCapacityNoClobber(key, value);
+                    }
                 }
 
                 return Value{ .map = map };
             },
 
-            else => return error.Unhandled,
+            // TODO we should probably have an option to encode `null` and also
+            // allow for some default value too.
+            .Optional => return if (input) |val| encode(arena, val) else null,
+
+            .Null => return null,
+
+            else => {
+                log.err("Unhandled type: {s}", .{@typeName(@TypeOf(input))});
+                return error.Unhandled;
+            },
         }
     }
 };
@@ -423,11 +433,13 @@ pub fn stringify(allocator: Allocator, input: anytype, writer: anytype) !void {
     var arena = ArenaAllocator.init(allocator);
     defer arena.deinit();
 
-    var value = try Value.encode(arena.allocator(), input);
+    var maybe_value = try Value.encode(arena.allocator(), input);
 
-    // TODO should we output as an explicit doc?
-    // How can allow the user to specify?
-    try value.stringify(writer, .{});
+    if (maybe_value) |value| {
+        // TODO should we output as an explicit doc?
+        // How can allow the user to specify?
+        try value.stringify(writer, .{});
+    }
 }
 
 test {
