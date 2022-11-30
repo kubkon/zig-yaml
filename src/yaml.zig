@@ -222,6 +222,14 @@ pub const Value = union(enum) {
                 return Value{ .map = map };
             },
 
+            .Union => |union_ti| if (union_ti.tag_type) |tag_type| {
+                inline for (union_ti.fields) |field| {
+                    if (@field(tag_type, field.name) == input) {
+                        return try encode(arena, @field(input, field.name));
+                    }
+                } else unreachable;
+            } else return error.UntaggedUnion,
+
             // TODO we should probably have an option to encode `null` and also
             // allow for some default value too.
             .Optional => return if (input) |val| encode(arena, val) else null,

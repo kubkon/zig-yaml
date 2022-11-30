@@ -450,3 +450,12 @@ test "stringify an optional" {
     try testStringify("", null);
     try testStringify("", @as(?u64, null));
 }
+
+test "stringify a union" {
+    const Dummy = union(enum) {
+        x: u64,
+        y: f64,
+    };
+    try testStringify("a: 1", struct { a: Dummy }{ .a = .{ .x = 1 } });
+    try testStringify("a: 2.1", struct { a: Dummy }{ .a = .{ .y = 2.1 } });
+}
