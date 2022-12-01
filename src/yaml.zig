@@ -18,6 +18,7 @@ pub const YamlError = error{
     UnexpectedNodeType,
     DuplicateMapKey,
     OutOfMemory,
+    CannotEncodeValue,
 } || ParseError || std.fmt.ParseIntError;
 
 pub const List = []Value;
@@ -203,16 +204,30 @@ pub const Value = union(enum) {
 
     fn encode(arena: Allocator, input: anytype) YamlError!?Value {
         switch (@typeInfo(@TypeOf(input))) {
-            .Int => return Value{ .int = math.cast(i64, input) orelse return error.Overflow },
+            .ComptimeInt,
+            .Int,
+            => return Value{ .int = math.cast(i64, input) orelse return error.Overflow },
 
             .Float => return Value{ .float = math.lossyCast(f64, input) },
 
-            .Struct => |struct_ti| {
+            .Struct => |info| if (info.is_tuple) {
+                var list = std.ArrayList(Value).init(arena);
+                errdefer list.deinit();
+                try list.ensureTotalCapacityPrecise(info.fields.len);
+
+                inline for (info.fields) |field| {
+                    if (try encode(arena, @field(input, field.name))) |value| {
+                        list.appendAssumeCapacity(value);
+                    }
+                }
+
+                return Value{ .list = list.toOwnedSlice() };
+            } else {
                 var map = Map.init(arena);
                 errdefer map.deinit();
-                try map.ensureTotalCapacity(struct_ti.fields.len);
+                try map.ensureTotalCapacity(info.fields.len);
 
-                inline for (struct_ti.fields) |field| {
+                inline for (info.fields) |field| {
                     if (try encode(arena, @field(input, field.name))) |value| {
                         const key = try arena.dupe(u8, field.name);
                         map.putAssumeCapacityNoClobber(key, value);
@@ -222,13 +237,52 @@ pub const Value = union(enum) {
                 return Value{ .map = map };
             },
 
-            .Union => |union_ti| if (union_ti.tag_type) |tag_type| {
-                inline for (union_ti.fields) |field| {
+            .Union => |info| if (info.tag_type) |tag_type| {
+                inline for (info.fields) |field| {
                     if (@field(tag_type, field.name) == input) {
                         return try encode(arena, @field(input, field.name));
                     }
                 } else unreachable;
             } else return error.UntaggedUnion,
+
+            .Array => return encode(arena, &input),
+
+            .Pointer => |info| switch (info.size) {
+                .One => switch (@typeInfo(info.child)) {
+                    .Array => |child_info| {
+                        const Slice = []const child_info.child;
+                        return encode(arena, @as(Slice, input));
+                    },
+                    else => {
+                        log.err("Unhandled type: {s}", .{@typeName(info.child)});
+                        return error.Unhandled;
+                    },
+                },
+                .Slice => {
+                    if (info.child == u8) {
+                        return Value{ .string = try arena.dupe(u8, input) };
+                    }
+
+                    var list = std.ArrayList(Value).init(arena);
+                    errdefer list.deinit();
+                    try list.ensureTotalCapacityPrecise(input.len);
+
+                    for (input) |elem| {
+                        if (try encode(arena, elem)) |value| {
+                            list.appendAssumeCapacity(value);
+                        } else {
+                            log.err("Could not encode value in a list: {any}", .{elem});
+                            return error.CannotEncodeValue;
+                        }
+                    }
+
+                    return Value{ .list = list.toOwnedSlice() };
+                },
+                else => {
+                    log.err("Unhandled type: {s}", .{@typeName(@TypeOf(input))});
+                    return error.Unhandled;
+                },
+            },
 
             // TODO we should probably have an option to encode `null` and also
             // allow for some default value too.
@@ -396,8 +450,7 @@ pub const Yaml = struct {
 
         switch (ptr_info.size) {
             .Slice => {
-                const child_info = @typeInfo(ptr_info.child);
-                if (child_info == .Int and child_info.Int.bits == 8) {
+                if (ptr_info.child == u8) {
                     return value.asString();
                 }
 

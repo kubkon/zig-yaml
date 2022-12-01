@@ -459,3 +459,17 @@ test "stringify a union" {
     try testStringify("a: 1", struct { a: Dummy }{ .a = .{ .x = 1 } });
     try testStringify("a: 2.1", struct { a: Dummy }{ .a = .{ .y = 2.1 } });
 }
+
+test "stringify a string" {
+    try testStringify("a: name", struct { a: []const u8 }{ .a = "name" });
+    try testStringify("name", "name");
+}
+
+test "stringify a list" {
+    try testStringify("[ 1, 2, 3 ]", @as([]const u64, &.{ 1, 2, 3 }));
+    try testStringify("[ 1, 2, 3 ]", .{ @as(i64, 1), 2, 3 });
+    try testStringify("[ 1, name, 3 ]", .{ 1, "name", 3 });
+
+    const arr: [3]i64 = .{ 1, 2, 3 };
+    try testStringify("[ 1, 2, 3 ]", arr);
+}
