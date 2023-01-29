@@ -141,7 +141,7 @@ pub const GenerateStep = struct {
         loop: {
             while (walker.next()) |entry| {
                 if (entry) |e| {
-                    try emitTestForTag(self.builder.allocator, writer, e.path, e);
+                    if(emitTestForTag(self.builder.allocator, writer, e.path, e)) |_| {} else |_| {}
                 } else {
                    break :loop;
                 }
@@ -159,9 +159,6 @@ pub const GenerateStep = struct {
     }
     
     fn emitTestForTag(allocator: Allocator, writer: anytype, name: []const u8, dir: std.fs.IterableDir.Walker.WalkerEntry) !void {
-        try writer.writeAll("test \"");
-        try writer.writeAll(name);
-        try writer.writeAll("\" {\n");
         
         const error_file_path = path.join(allocator, &[_][]const u8{
             "test/data/tags",
@@ -184,22 +181,36 @@ pub const GenerateStep = struct {
             "in.yaml",
         }) catch unreachable;
         
-        try writer.writeAll("if(loadFromFile(\"");
+        try cwd.access(input_file_path,.{});
+        
+        try writer.writeAll("test \"");
+        try writer.writeAll(name);
+        try writer.writeAll("\" {\n");
+        
+        
+        try writer.writeAll("    if(loadFromFile(\"");
         try writer.writeAll(input_file_path);
         try writer.writeAll("\")) |yaml_const| {\n");
-        try writer.writeAll("    var yaml = yaml_const;\n");
-        try writer.writeAll("    yaml.deinit();\n");
-        try writer.writeAll("        try testing.expect(true);\n");
-        try writer.writeAll("} else |_| {\n");
+        try writer.writeAll("        var yaml = yaml_const;\n");
+        try writer.writeAll("        yaml.deinit();\n");
         
-            //check if we were expecting a problem or not
-            if(has_error_file) {
-                try writer.writeAll("        try testing.expect(true);\n");
-            } else {
-                try writer.writeAll("        try testing.expect(false);\n");
-            }
+        //check if we were expecting a problem or not
+        if(has_error_file) {
+            try writer.writeAll("        try testing.expect(false);\n");
+        } else {
+            try writer.writeAll("        try testing.expect(true);\n");
+        }
         
-        try writer.writeAll("}\n");
+        try writer.writeAll("    } else |_| {\n");
+        
+        //check if we were expecting a problem or not
+        if(has_error_file) {
+            try writer.writeAll("        try testing.expect(true);\n");
+        } else {
+            try writer.writeAll("        try testing.expect(false);\n");
+        }
+        
+        try writer.writeAll("    }\n");
          
         
         try writer.writeAll("}\n\n");
