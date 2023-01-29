@@ -372,7 +372,7 @@ const Parser = struct {
 
         // Parse header
         const explicit_doc: bool = if (self.eatToken(.doc_start, &.{})) |doc_pos| explicit_doc: {
-            if (self.getCol(doc_pos) > 0) return error.MalformedYaml;
+            if (try self.getCol(doc_pos) > 0) return error.MalformedYaml;
             if (self.eatToken(.tag, &.{ .new_line, .comment })) |_| {
                 node.directive = try self.expectToken(.literal, &.{ .new_line, .comment });
             }
@@ -393,13 +393,13 @@ const Parser = struct {
         footer: {
             if (self.eatToken(.doc_end, &.{})) |pos| {
                 if (!explicit_doc) return error.UnexpectedToken;
-                if (self.getCol(pos) > 0) return error.MalformedYaml;
+                if (try self.getCol(pos) > 0) return error.MalformedYaml;
                 node.base.end = pos;
                 break :footer;
             }
             if (self.eatToken(.doc_start, &.{})) |pos| {
                 if (!explicit_doc) return error.UnexpectedToken;
-                if (self.getCol(pos) > 0) return error.MalformedYaml;
+                if (try self.getCol(pos) > 0) return error.MalformedYaml;
                 self.token_it.seekBy(-1);
                 node.base.end = pos - 1;
                 break :footer;
@@ -434,14 +434,14 @@ const Parser = struct {
 
         log.debug("(map) begin {s}@{d}", .{ @tagName(self.tree.tokens[node.base.start].id), node.base.start });
 
-        const col = self.getCol(node.base.start);
+        const col = try self.getCol(node.base.start);
 
         while (true) {
             self.eatCommentsAndSpace(&.{});
 
             // Parse key
             const key_pos = self.token_it.pos;
-            if (self.getCol(key_pos) < col) {
+            if (try self.getCol(key_pos) < col) {
                 break;
             }
 
@@ -471,11 +471,11 @@ const Parser = struct {
             };
 
             if (val) |v| {
-                if (self.getCol(v.start) < self.getCol(key_pos)) {
+                if (try self.getCol(v.start) < try self.getCol(key_pos)) {
                     return error.MalformedYaml;
                 }
                 if (v.cast(Node.Value)) |_| {
-                    if (self.getCol(v.start) == self.getCol(key_pos)) {
+                    if (try self.getCol(v.start) == try self.getCol(key_pos)) {
                         return error.MalformedYaml;
                     }
                 }
@@ -658,8 +658,12 @@ const Parser = struct {
         return self.line_cols.get(index).?.line;
     }
 
-    fn getCol(self: *Parser, index: TokenIndex) usize {
-        return self.line_cols.get(index).?.col;
+    fn getCol(self: *Parser, index: TokenIndex) ParseError!usize {
+        if(self.line_cols.get(index)) |index_actual| {
+            return index_actual.col;
+        } else {
+            return ParseError.UnexpectedEof;
+        }
     }
 
     fn parseSingleQuoted(self: *Parser, node: *Node.Value, raw: []const u8) ParseError!void {
@@ -697,7 +701,9 @@ const Parser = struct {
     }
 
     fn parseDoubleQuoted(self: *Parser, node: *Node.Value, raw: []const u8) ParseError!void {
-        assert(raw[0] == '"' and raw[raw.len - 1] == '"');
+        if((raw[0] == '"' and raw[raw.len - 1] == '"') == false) {
+            return ParseError.Unhandled;
+        }
 
         const raw_no_quotes = raw[1 .. raw.len - 1];
         try node.string_value.ensureTotalCapacity(self.allocator, raw_no_quotes.len);

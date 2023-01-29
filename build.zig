@@ -46,6 +46,7 @@ pub fn build(b: *std.build.Builder) void {
         const gen = GenerateStep.init(b,"yamlTest.zig");
         test_step.dependOn(&gen.step);
         var full_yaml_tests = b.addTest("zig-cache/yamlTest.zig");
+        full_yaml_tests.addPackagePath("yaml", "src/yaml.zig");
         test_step.dependOn(&full_yaml_tests.step);
     } else |_| {
         std.debug.print("No 'data' directory with YAML tests provided\n",.{});
@@ -161,9 +162,46 @@ pub const GenerateStep = struct {
         try writer.writeAll("test \"");
         try writer.writeAll(name);
         try writer.writeAll("\" {\n");
-        _ = dir;
-        _ = allocator;
-        try writer.writeAll("    try testing.expect(true);\n");
+        
+        const error_file_path = path.join(allocator, &[_][]const u8{
+            "data/tags",
+            dir.path,
+            "error",
+        }) catch unreachable;
+        
+        const cwd = std.fs.cwd();
+        var has_error_file: bool = undefined;
+        if(cwd.access(error_file_path,.{})) {
+            has_error_file = true;
+        } else |_| {
+            has_error_file = false;
+        }
+        
+        
+        const input_file_path = path.join(allocator, &[_][]const u8{
+            "data/tags",
+            dir.path,
+            "in.yaml",
+        }) catch unreachable;
+        
+        try writer.writeAll("if(loadFromFile(\"");
+        try writer.writeAll(input_file_path);
+        try writer.writeAll("\")) |yaml_const| {\n");
+        try writer.writeAll("    var yaml = yaml_const;\n");
+        try writer.writeAll("    yaml.deinit();\n");
+        try writer.writeAll("        try testing.expect(true);\n");
+        try writer.writeAll("} else |_| {\n");
+        
+            //check if we were expecting a problem or not
+            if(has_error_file) {
+                try writer.writeAll("        try testing.expect(true);\n");
+            } else {
+                try writer.writeAll("        try testing.expect(false);\n");
+            }
+        
+        try writer.writeAll("}\n");
+         
+        
         try writer.writeAll("}\n\n");
     }
 };
