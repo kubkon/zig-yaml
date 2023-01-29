@@ -89,9 +89,7 @@ pub const GenerateStep = struct {
 
     output_file: std.build.GeneratedFile,
 
-    /// Initialize a Vulkan generation step, for `builder`. `spec_path` is the path to
-    /// vk.xml, relative to the project root. The generated bindings will be placed at
-    /// `out_path`, which is relative to the zig-cache directory.
+    /// Create the builder, which will generate the YAML test file for us
     pub fn init(builder: *Builder, out_path: []const u8) *GenerateStep {
         const self = builder.allocator.create(GenerateStep) catch unreachable;
         const full_out_path = path.join(builder.allocator, &[_][]const u8{
@@ -111,10 +109,7 @@ pub const GenerateStep = struct {
         return self;
     }
 
-    /// Internal build function. This reads `vk.xml`, and passes it to `generate`, which then generates
-    /// the final bindings. The resulting generated bindings are not formatted, which is why an ArrayList
-    /// writer is passed instead of a file writer. This is then formatted into standard formatting
-    /// by parsing it and rendering with `std.zig.parse` and `std.zig.render` respectively.
+    /// Walk the 'data' dir, follow the symlinks, emit the file into the cache
     fn make(step: *Step) !void {
         const self = @fieldParentPtr(GenerateStep, "step", step);
         const cwd = std.fs.cwd();
