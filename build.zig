@@ -40,7 +40,7 @@ pub fn build(b: *std.build.Builder) void {
     test_step.dependOn(&e2e_tests.step);
 
     const cwd = std.fs.cwd();
-    if(cwd.access("data",.{})) {
+    if(cwd.access("test/data",.{})) {
         std.debug.print("Found 'data' directory with YAML tests. Attempting to generate test cases\n",.{});
         
         const gen = GenerateStep.init(b,"yamlTest.zig");
@@ -129,7 +129,7 @@ pub const GenerateStep = struct {
         //read the tags, follow the links, generate the tests
         const root_data_dir = path.join(self.builder.allocator, &[_][]const u8{
             self.builder.build_root,
-            "data",
+            "test/data",
         }) catch unreachable;
          
         const tagdir = try std.fs.openDirAbsolute(root_data_dir, .{});
@@ -164,7 +164,7 @@ pub const GenerateStep = struct {
         try writer.writeAll("\" {\n");
         
         const error_file_path = path.join(allocator, &[_][]const u8{
-            "data/tags",
+            "test/data/tags",
             dir.path,
             "error",
         }) catch unreachable;
@@ -179,7 +179,7 @@ pub const GenerateStep = struct {
         
         
         const input_file_path = path.join(allocator, &[_][]const u8{
-            "data/tags",
+            "test/data/tags",
             dir.path,
             "in.yaml",
         }) catch unreachable;
