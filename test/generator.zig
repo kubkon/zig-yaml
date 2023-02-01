@@ -205,6 +205,7 @@ pub const GenerateStep = struct {
 //constant text for the detailed load success/fail cases
 
 const verbose_loadfile = 
+    \\    var failed: bool = false;
     \\    if(loadFromFile("
 ;
 const verbose_expect_error = 
@@ -212,8 +213,13 @@ const verbose_expect_error =
     \\        var yml = it_parsed;
     \\        yml.deinit();
     \\        std.debug.print("fail\n",.{});
+    \\        failed = true;
     \\    } else |_| {
     \\        std.debug.print("success\n",.{});
+    \\    }
+    \\
+    \\    if(failed) {
+    \\      return error.Failed;
     \\    }
 ;
 
@@ -224,6 +230,10 @@ const verbose_expect_no_error =
     \\       std.debug.print("success\n",.{});
     \\    } else |_| {
     \\        std.debug.print("fail\n",.{});
+    \\        failed = true;
+    \\    }
+    \\    if(failed) {
+    \\      return error.Failed;
     \\    }
 ;
 
