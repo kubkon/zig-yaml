@@ -212,7 +212,6 @@ const verbose_expect_error =
     \\")) |it_parsed| {
     \\        var yml = it_parsed;
     \\        yml.deinit();
-    \\        std.debug.print("fail\n",.{});
     \\        failed = true;
     \\    } else |_| {
     \\        std.debug.print("success\n",.{});
@@ -229,7 +228,6 @@ const verbose_expect_no_error =
     \\       yml.deinit();
     \\       std.debug.print("success\n",.{});
     \\    } else |_| {
-    \\        std.debug.print("fail\n",.{});
     \\        failed = true;
     \\    }
     \\    if(failed) {
