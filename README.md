@@ -116,3 +116,20 @@ test "indent/EW3V" {
     return error.UnexpectedSuccess;
 }
 ```
+
+running zig build test with the following option   
+
+```
+-DspecificYAML="string"
+-DspecificYAML={"stringOne","stringTwo"}
+```
+
+will generate only tests that match those strings. This can be used to specify the particular test or test groups you want to generate tests for. For example running 
+`-DspecificYAML={"comment/6HB6","5T43"}` will produce the following tests.   
+
+```
+test "comment/6HB6"
+test "mapping/5T43"
+test "scalar/5T43" 
+test "flow/5T43" 
+``` 
