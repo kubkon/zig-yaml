@@ -63,27 +63,30 @@ pub const GenerateStep = struct {
         const cwd = std.fs.cwd();
         
         var out_buffer = std.ArrayList(u8).init(self.builder.allocator);
-        
         const writer = out_buffer.writer();
-        
+       
         try writer.writeAll(preamble);
-        
         
         //read the tags, follow the links, generate the tests
         const root_data_dir = path.join(self.builder.allocator, &[_][]const u8{
             self.builder.build_root,
             "test/data",
         }) catch unreachable;
-         
+        
+        //open the root directory, which 'should' contain the tags folder.
         const tagdir = try std.fs.openDirAbsolute(root_data_dir, .{});
         
+        //then open the tags subdirectory for iterating
         var itdir = try tagdir.openIterableDir("tags",.{});
         
+        //we now want to walk the directory, including the symlinked folders, there should be no loops
+        //unsure how the walker might handle loops.. 
         var walker = try itdir.walk(self.builder.allocator);
         defer walker.deinit();
         loop: {
             while (walker.next()) |entry| {
                 if (entry) |e| {
+                    //for any valid entry, we can emit a test, 
                     if(emitTestForTag(self.builder.allocator, writer, e.path, e)) |_| {} else |_| {}
                 } else {
                    break :loop;
@@ -94,6 +97,7 @@ pub const GenerateStep = struct {
             }
         }
         
+        //our buffer now has all the tests, we can dump it out to the file
         try out_buffer.append(0);
         const src = out_buffer.items[0 .. out_buffer.items.len - 1 :0];
         const dir = path.dirname(self.output_file.path.?).?;
@@ -101,6 +105,8 @@ pub const GenerateStep = struct {
         try cwd.writeFile(self.output_file.path.?, src);
     }
 
+    //access returns an error or is void, this will make it a bool
+    //behaviour of some of the tests is determined by the presence (as opposed to contents) of a file
     fn canAccess(file_path: []const u8) bool {
         const cwd = std.fs.cwd();
         if(cwd.access(file_path,.{})) {
