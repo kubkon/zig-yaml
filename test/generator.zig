@@ -27,6 +27,7 @@ const preamble =
     \\    return Yaml.load(gpa, source);
     \\}
     \\
+    \\
 ;
  
 pub const GenerateStep = struct {
@@ -161,20 +162,20 @@ pub const GenerateStep = struct {
 
     fn emitErrorIsSuccessCase(writer: anytype, name: []const u8) !void {
         //Write: var yaml = loadFromFile("PATH/TO/FILE/in.yaml") catch return;
-        try writer.writeAll("var yaml = loadFromFile(\"");
+        try writer.writeAll("    var yaml = loadFromFile(\"");
         try writer.writeAll(name);
         try writer.writeAll("\") catch return;\n");
         //write rest of function
-        try writer.writeAll("defer yaml.deinit();\n");
-        try writer.writeAll("return error.UnexpectedSuccess;\n");
+        try writer.writeAll("    defer yaml.deinit();\n");
+        try writer.writeAll("    return error.UnexpectedSuccess;\n");
     }
 
     fn emitErrorIsFailureCase(writer: anytype, name: []const u8) !void {
         //Write: var yaml = loadFromFile("PATH/TO/FILE/in.yaml") catch return error.Failed;
-        try writer.writeAll("var yaml = loadFromFile(\"");
+        try writer.writeAll("    var yaml = loadFromFile(\"");
         try writer.writeAll(name);
-        try writer.writeAll("\") catch return;\n");
+        try writer.writeAll("\") catch return error.Failed;\n");
         //write rest of function
-        try writer.writeAll("defer yaml.deinit();\n");
+        try writer.writeAll("    defer yaml.deinit();\n");
     }
 };

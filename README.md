@@ -88,3 +88,31 @@ nested:
     wick: john doe
 finally: [ 8.17, 19.78, 17, 21  ]
 ```
+
+## Testing against YAML 1.2 compatibility tests
+
+To test against the YAML 1.2 compatibility tests, first obtain the tests from https://github.com/yaml/yaml-test-suite.
+Follow the instructions to obtain the `data` directory which contains all of the test cases. 
+Copy this directory into the `test` folder where `generator.zig` is located.
+Running `zig build test` will now generate test cases for the YAML 1.2 compatibility tests. They can be found in the zig-cache in a file named `yamlTest.zig`.
+
+The test cases have the following format.
+
+For a test that should parse correctly.
+
+```
+test "indent/SKE5" {
+    var yaml = loadFromFile("test/data/tags/indent/SKE5/in.yaml") catch return error.Failed;
+    defer yaml.deinit();
+}
+```
+
+For a test that should fail to parse.
+
+```
+test "indent/EW3V" {
+    var yaml = loadFromFile("test/data/tags/indent/EW3V/in.yaml") catch return;
+    defer yaml.deinit();
+    return error.UnexpectedSuccess;
+}
+```
