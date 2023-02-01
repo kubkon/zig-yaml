@@ -5,6 +5,9 @@ pub fn build(b: *std.build.Builder) void {
     const mode = b.standardReleaseOptions();
 
     const enable_logging = b.option(bool, "log", "Whether to enable logging") orelse false;
+    const create_only_yaml_tests = b.option([]const []const u8, "specificYAML", "generate only YAML tests matching this eg -DspecificYAML{\"comment/6HB6\",\"EW3V\"}") orelse &[_][]const u8{};
+
+    const enable_silent_yaml = b.option(bool, "silentYAML", "all YAML tests will pass, failures will be logged cleanly") orelse false;
 
     const lib = b.addStaticLibrary("yaml", "src/yaml.zig");
     lib.setBuildMode(mode);
@@ -20,6 +23,8 @@ pub fn build(b: *std.build.Builder) void {
     const example_opts = b.addOptions();
     example.addOptions("build_options", example_opts);
     example_opts.addOption(bool, "enable_logging", enable_logging);
+    example_opts.addOption(bool, "enable_silent_yaml", enable_silent_yaml);
+    example_opts.addOption([]const []const u8, "gen_tests_only", create_only_yaml_tests);
 
     example.install();
 
@@ -44,7 +49,7 @@ pub fn build(b: *std.build.Builder) void {
     if(cwd.access("test/data",.{})) {
         std.debug.print("Found 'data' directory with YAML tests. Attempting to generate test cases\n",.{});
         
-        const gen = GenerateStep.init(b,"yamlTest.zig");
+        const gen = GenerateStep.init(b,"yamlTest.zig",create_only_yaml_tests,enable_silent_yaml);
         test_step.dependOn(&gen.step);
         var full_yaml_tests = b.addTest("zig-cache/yamlTest.zig");
         full_yaml_tests.addPackagePath("yaml", "src/yaml.zig");

@@ -33,11 +33,13 @@ const preamble =
 pub const GenerateStep = struct {
     step: Step,
     builder: *Builder,
+    build_for_only: []const []const u8,
+    silent_mode: bool,
 
     output_file: std.build.GeneratedFile,
 
     /// Create the builder, which will generate the YAML test file for us
-    pub fn init(builder: *Builder, out_path: []const u8) *GenerateStep {
+    pub fn init(builder: *Builder, out_path: []const u8, build_only: []const []const u8, silent_mode: bool) *GenerateStep {
         const self = builder.allocator.create(GenerateStep) catch unreachable;
         const full_out_path = path.join(builder.allocator, &[_][]const u8{
             builder.build_root,
@@ -48,6 +50,8 @@ pub const GenerateStep = struct {
         self.* = .{
             .step = Step.init(.custom, "yaml-test-generate", builder.allocator, make),
             .builder = builder,
+            .build_for_only = build_only,
+            .silent_mode = silent_mode,
             .output_file = .{
                 .step = &self.step,
                 .path = full_out_path,
@@ -86,8 +90,30 @@ pub const GenerateStep = struct {
         loop: {
             while (walker.next()) |entry| {
                 if (entry) |e| {
-                    //for any valid entry, we can emit a test, 
-                    if(emitTestForTag(self.builder.allocator, writer, e.path, e)) |_| {} else |_| {}
+                    //check if we are omitting tests.
+                    var emit_tests: bool = true;
+                    //if we have specified some items in the 'build for only' array
+                    if (self.build_for_only.len > 0) {
+                        emit_tests = false;
+                        //then we need to iterate them
+                        for (self.build_for_only) |permitted_test| {
+                            //check if we can needle/haystack without crashing
+                            //std probably needs this check and should return false if the preconditions are not met?
+                            //maybe this is done already in a wrapper function
+                            if(e.path.len >= permitted_test.len) {
+                                //check if we have a match and should emit
+                                const index = std.mem.indexOfPosLinear(u8,e.path,0,permitted_test); 
+                                if(index != null) {
+                                    emit_tests = true;
+                                }
+                            }
+                        }
+                    }
+
+                    //for any valid entry, we can emit a test,
+                    if(emit_tests) { 
+                        if(emitTestForTag(self.builder.allocator, writer, e.path, e,self.silent_mode)) |_| {} else |_| {}
+                    }
                 } else {
                    break :loop;
                 }
@@ -116,8 +142,10 @@ pub const GenerateStep = struct {
         }
     }
     
-    fn emitTestForTag(allocator: Allocator, writer: anytype, name: []const u8, dir: std.fs.IterableDir.Walker.WalkerEntry) !void {
-        
+    fn emitTestForTag(allocator: Allocator, writer: anytype, name: []const u8, dir: std.fs.IterableDir.Walker.WalkerEntry, silent: bool) !void {
+       
+        _ = silent;
+
         const error_file_path = path.join(allocator, &[_][]const u8{
             "test/data/tags",
             dir.path,
