@@ -144,8 +144,6 @@ pub const GenerateStep = struct {
     
     fn emitTestForTag(allocator: Allocator, writer: anytype, name: []const u8, dir: std.fs.IterableDir.Walker.WalkerEntry, silent: bool) !void {
        
-        _ = silent;
-
         const error_file_path = path.join(allocator, &[_][]const u8{
             "test/data/tags",
             dir.path,
@@ -183,19 +181,96 @@ pub const GenerateStep = struct {
 
         try emitFunctionStart(writer, name, header_source);
 
-        //the presence of an error file means our parser/tokeniser SHOULD get an error
-        if(has_error_file) {
-            try emitErrorIsSuccessCase(writer,input_file_path);
-        }
-        //otherwise we expect the parsing to succeed correctly
-        else {
-            try emitErrorIsFailureCase(writer,input_file_path); 
+        //it means silent for Zig test. so the test will always pass, but we will log the information
+        //about the actual success or failure of the test, so we can determine what we need to do
+        //to get compliance.
+        if(silent) {
+             try emitDetailed(writer,input_file_path,has_error_file);
+        } else { 
+
+            //the presence of an error file means our parser/tokeniser SHOULD get an error
+            if(has_error_file) {
+                try emitErrorIsSuccessCase(writer,input_file_path);
+            }
+            //otherwise we expect the parsing to succeed correctly
+            else {
+                try emitErrorIsFailureCase(writer,input_file_path); 
+            }
         }
                 
         try emitFunctionFinish(writer);
         
     }
 
+//constant text for the detailed load success/fail cases
+
+const verbose_loadfile = 
+    \\    if(loadFromFile("
+;
+const verbose_expect_error = 
+    \\")) |it_parsed| {
+    \\        var yml = it_parsed;
+    \\        yml.deinit();
+    \\        std.debug.print("fail\n",.{});
+    \\    } else |_| {
+    \\        std.debug.print("success\n",.{});
+    \\    }
+;
+
+const verbose_expect_no_error = 
+    \\")) |it_parsed| {
+    \\       var yml = it_parsed;
+    \\       yml.deinit();
+    \\       std.debug.print("success\n",.{});
+    \\    } else |_| {
+    \\        std.debug.print("fail\n",.{});
+    \\    }
+;
+
+
+    fn emitDetailed(writer: anytype, name: []const u8, has_error: bool) !void {
+        try writer.writeAll(verbose_loadfile);
+        try writer.writeAll(name);
+        if(has_error) {
+            try writer.writeAll(verbose_expect_error);
+        } else {
+            try writer.writeAll(verbose_expect_no_error);
+        }
+    }
+
+//constant text for the standard load success/fail cases
+
+const loadfile = 
+    \\    var yaml = loadFromFile("
+;
+
+const endErrorSuccess =
+    \\") catch return;
+    \\    defer yaml.deinit();
+    \\    return error.UnexpectedSuccess;
+    \\
+;
+
+const endErrorIsFailure = 
+    \\") catch return error.Failed;
+    \\    defer yaml.deinit();
+    \\
+;
+
+    fn emitErrorIsSuccessCase(writer: anytype, name: []const u8) !void {
+        try writer.writeAll(loadfile);
+        try writer.writeAll(name);
+        try writer.writeAll(endErrorSuccess);
+    }
+
+    fn emitErrorIsFailureCase(writer: anytype, name: []const u8) !void {
+        try writer.writeAll(loadfile);
+        try writer.writeAll(name);
+        try writer.writeAll(endErrorIsFailure);
+    }
+
+
+    //function start and finish
     fn emitFunctionStart(writer: anytype, name: []const u8, details: []const u8) !void {
         try writer.writeAll("//");
         try writer.writeAll(details);
@@ -209,22 +284,5 @@ pub const GenerateStep = struct {
         try writer.writeAll("}\n\n\n");
     }
 
-    fn emitErrorIsSuccessCase(writer: anytype, name: []const u8) !void {
-        //Write: var yaml = loadFromFile("PATH/TO/FILE/in.yaml") catch return;
-        try writer.writeAll("    var yaml = loadFromFile(\"");
-        try writer.writeAll(name);
-        try writer.writeAll("\") catch return;\n");
-        //write rest of function
-        try writer.writeAll("    defer yaml.deinit();\n");
-        try writer.writeAll("    return error.UnexpectedSuccess;\n");
-    }
 
-    fn emitErrorIsFailureCase(writer: anytype, name: []const u8) !void {
-        //Write: var yaml = loadFromFile("PATH/TO/FILE/in.yaml") catch return error.Failed;
-        try writer.writeAll("    var yaml = loadFromFile(\"");
-        try writer.writeAll(name);
-        try writer.writeAll("\") catch return error.Failed;\n");
-        //write rest of function
-        try writer.writeAll("    defer yaml.deinit();\n");
-    }
 };
