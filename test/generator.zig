@@ -136,12 +136,24 @@ pub const GenerateStep = struct {
         //possibly the directory structure changed, submit bug report? 
         const cwd = std.fs.cwd();
         try cwd.access(input_file_path,.{});
-        
+
+        //load the header file that contains test information
+        const header_file_path = path.join(allocator, &[_][]const u8{
+            "test/data/tags",
+            dir.path,
+            "==="
+        }) catch unreachable;
+
+        const file = try std.fs.cwd().openFile(header_file_path, .{});
+        defer file.close();
+        const header_source = try file.readToEndAlloc(allocator, std.math.maxInt(u32));
+        defer allocator.free(header_source);
+
         //we have access to the input file at the path specified,
         //we have also determined if we expect an error or not
         //we can now emit the basic test case
 
-        try emitFunctionStart(writer, name);
+        try emitFunctionStart(writer, name, header_source);
 
         //the presence of an error file means our parser/tokeniser SHOULD get an error
         if(has_error_file) {
@@ -156,14 +168,17 @@ pub const GenerateStep = struct {
         
     }
 
-    fn emitFunctionStart(writer: anytype, name: []const u8) !void {
+    fn emitFunctionStart(writer: anytype, name: []const u8, details: []const u8) !void {
+        try writer.writeAll("//");
+        try writer.writeAll(details);
+        try writer.writeAll("\n");
         try writer.writeAll("test \"");
         try writer.writeAll(name);
         try writer.writeAll("\" {\n");
     }
 
     fn emitFunctionFinish(writer: anytype) !void {
-        try writer.writeAll("}\n\n");
+        try writer.writeAll("}\n\n\n");
     }
 
     fn emitErrorIsSuccessCase(writer: anytype, name: []const u8) !void {
