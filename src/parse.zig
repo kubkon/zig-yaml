@@ -659,7 +659,7 @@ const Parser = struct {
     }
 
     fn getCol(self: *Parser, index: TokenIndex) ParseError!usize {
-        if(self.line_cols.get(index)) |index_actual| {
+        if (self.line_cols.get(index)) |index_actual| {
             return index_actual.col;
         } else {
             return ParseError.UnexpectedEof;
@@ -701,7 +701,7 @@ const Parser = struct {
     }
 
     fn parseDoubleQuoted(self: *Parser, node: *Node.Value, raw: []const u8) ParseError!void {
-        if((raw[0] == '"' and raw[raw.len - 1] == '"') == false) {
+        if ((raw[0] == '"' and raw[raw.len - 1] == '"') == false) {
             return ParseError.Unhandled;
         }
 
