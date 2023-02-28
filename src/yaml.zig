@@ -74,7 +74,7 @@ pub const Value = union(enum) {
 
                 const first = list[0];
                 if (first.isCompound()) {
-                    for (list) |elem, i| {
+                    for (list, 0..list.len) |elem, i| {
                         try writer.writeByteNTimes(' ', args.indentation);
                         try writer.writeAll("- ");
                         try elem.stringify(writer, .{
@@ -89,7 +89,7 @@ pub const Value = union(enum) {
                 }
 
                 try writer.writeAll("[ ");
-                for (list) |elem, i| {
+                for (list, 0..list.len) |elem, i| {
                     try elem.stringify(writer, args);
                     if (i < len - 1) {
                         try writer.writeAll(", ");
@@ -350,7 +350,7 @@ pub const Yaml = struct {
         switch (@typeInfo(T)) {
             .Array => |info| {
                 var parsed: T = undefined;
-                for (self.docs.items) |doc, i| {
+                for (self.docs.items, 0..self.docs.items.len) |doc, i| {
                     parsed[i] = try self.parseValue(info.child, doc);
                 }
                 return parsed;
@@ -359,7 +359,7 @@ pub const Yaml = struct {
                 switch (info.size) {
                     .Slice => {
                         var parsed = try self.arena.allocator().alloc(info.child, self.docs.items.len);
-                        for (self.docs.items) |doc, i| {
+                        for (self.docs.items, 0..self.docs.items.len) |doc, i| {
                             parsed[i] = try self.parseValue(info.child, doc);
                         }
                         return parsed;
@@ -452,7 +452,7 @@ pub const Yaml = struct {
                 }
 
                 var parsed = try arena.alloc(ptr_info.child, value.list.len);
-                for (value.list) |elem, i| {
+                for (value.list, 0..value.list.len) |elem, i| {
                     parsed[i] = try self.parseValue(ptr_info.child, elem);
                 }
                 return parsed;
@@ -466,7 +466,7 @@ pub const Yaml = struct {
         if (array_info.len != list.len) return error.ArraySizeMismatch;
 
         var parsed: T = undefined;
-        for (list) |elem, i| {
+        for (list, 0..list.len) |elem, i| {
             parsed[i] = try self.parseValue(array_info.child, elem);
         }
 
@@ -474,7 +474,7 @@ pub const Yaml = struct {
     }
 
     pub fn stringify(self: Yaml, writer: anytype) !void {
-        for (self.docs.items) |doc, i| {
+        for (self.docs.items, 0..self.docs.items.len) |doc, i| {
             try writer.writeAll("---");
             if (self.tree.?.getDirective(i)) |directive| {
                 try writer.print(" !{s}", .{directive});

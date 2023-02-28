@@ -32,15 +32,15 @@ test "simple" {
             if (self.numbers.len != other.numbers.len) return false;
             if (self.finally.len != other.finally.len) return false;
 
-            for (self.names) |lhs, i| {
+            for (self.names, 0..self.names.len) |lhs, i| {
                 if (!mem.eql(u8, lhs, other.names[i])) return false;
             }
 
-            for (self.numbers) |lhs, i| {
+            for (self.numbers, 0..self.numbers.len) |lhs, i| {
                 if (lhs != other.numbers[i]) return false;
             }
 
-            for (self.finally) |lhs, i| {
+            for (self.finally, 0..self.finally.len) |lhs, i| {
                 if (lhs != other.finally[i]) return false;
             }
 
@@ -96,7 +96,7 @@ const LibTbd = struct {
         if (self.tbd_version != other.tbd_version) return false;
         if (self.targets.len != other.targets.len) return false;
 
-        for (self.targets) |target, i| {
+        for (self.targets, 0..self.targets.len) |target, i| {
             if (!mem.eql(u8, target, other.targets[i])) return false;
         }
 
@@ -118,17 +118,17 @@ const LibTbd = struct {
 
             if (reexported_libraries.len != o_reexported_libraries.len) return false;
 
-            for (reexported_libraries) |reexport, i| {
+            for (reexported_libraries, 0..reexported_libraries.len) |reexport, i| {
                 const o_reexport = o_reexported_libraries[i];
                 if (reexport.targets.len != o_reexport.targets.len) return false;
                 if (reexport.libraries.len != o_reexport.libraries.len) return false;
 
-                for (reexport.targets) |target, j| {
+                for (reexport.targets, 0..reexport.targets.len) |target, j| {
                     const o_target = o_reexport.targets[j];
                     if (!mem.eql(u8, target, o_target)) return false;
                 }
 
-                for (reexport.libraries) |library, j| {
+                for (reexport.libraries, 0..reexport.libraries.len) |library, j| {
                     const o_library = o_reexport.libraries[j];
                     if (!mem.eql(u8, library, o_library)) return false;
                 }
@@ -140,11 +140,11 @@ const LibTbd = struct {
 
             if (parent_umbrella.len != o_parent_umbrella.len) return false;
 
-            for (parent_umbrella) |pumbrella, i| {
+            for (parent_umbrella, 0..parent_umbrella.len) |pumbrella, i| {
                 const o_pumbrella = o_parent_umbrella[i];
                 if (pumbrella.targets.len != o_pumbrella.targets.len) return false;
 
-                for (pumbrella.targets) |target, j| {
+                for (pumbrella.targets, 0..pumbrella.targets.len) |target, j| {
                     const o_target = o_pumbrella.targets[j];
                     if (!mem.eql(u8, target, o_target)) return false;
                 }
@@ -155,17 +155,17 @@ const LibTbd = struct {
 
         if (self.exports.len != other.exports.len) return false;
 
-        for (self.exports) |exp, i| {
+        for (self.exports, 0..self.exports.len) |exp, i| {
             const o_exp = other.exports[i];
             if (exp.targets.len != o_exp.targets.len) return false;
             if (exp.symbols.len != o_exp.symbols.len) return false;
 
-            for (exp.targets) |target, j| {
+            for (exp.targets, 0..exp.targets.len) |target, j| {
                 const o_target = o_exp.targets[j];
                 if (!mem.eql(u8, target, o_target)) return false;
             }
 
-            for (exp.symbols) |symbol, j| {
+            for (exp.symbols, 0..exp.symbols.len) |symbol, j| {
                 const o_symbol = o_exp.symbols[j];
                 if (!mem.eql(u8, symbol, o_symbol)) return false;
             }
@@ -304,7 +304,7 @@ test "multi lib tbd" {
         },
     };
 
-    for (result) |lib, i| {
+    for (result, 0..result.len) |lib, i| {
         try testing.expect(lib.eql(expected[i]));
     }
 }

@@ -1,6 +1,6 @@
 const std = @import("std");
 const path = std.fs.path;
-const Builder = std.build.Builder;
+const Builder = std.Build;
 const Step = std.build.Step;
 const Allocator = std.mem.Allocator;
 
@@ -41,8 +41,8 @@ pub const GenerateStep = struct {
     pub fn init(builder: *Builder, out_path: []const u8, build_only: []const []const u8, silent_mode: bool) *GenerateStep {
         const self = builder.allocator.create(GenerateStep) catch unreachable;
         const full_out_path = path.join(builder.allocator, &[_][]const u8{
-            builder.build_root,
-            builder.cache_root,
+            builder.build_root.path.?,
+            builder.cache_root.path.?,
             out_path,
         }) catch unreachable;
 
@@ -71,7 +71,7 @@ pub const GenerateStep = struct {
 
         //read the tags, follow the links, generate the tests
         const root_data_dir = path.join(self.builder.allocator, &[_][]const u8{
-            self.builder.build_root,
+            self.builder.build_root.path.?,
             "test/data",
         }) catch unreachable;
 

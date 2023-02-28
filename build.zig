@@ -1,24 +1,40 @@
 const std = @import("std");
 const GenerateStep = @import("test/generator.zig").GenerateStep;
 
-pub fn build(b: *std.build.Builder) void {
-    const mode = b.standardReleaseOptions();
+pub fn build(b: *std.Build) void {
+    const optimize = b.standardOptimizeOption(.{});
+    const target = b.standardTargetOptions(.{});
 
     const enable_logging = b.option(bool, "log", "Whether to enable logging") orelse false;
     const create_only_yaml_tests = b.option([]const []const u8, "specificYAML", "generate only YAML tests matching this eg -DspecificYAML{\"comment/6HB6\",\"EW3V\"}") orelse &[_][]const u8{};
 
     const enable_silent_yaml = b.option(bool, "silentYAML", "all YAML tests will pass, failures will be logged cleanly") orelse false;
 
-    const lib = b.addStaticLibrary("yaml", "src/yaml.zig");
-    lib.setBuildMode(mode);
+    const lib = b.addStaticLibrary(.{
+        .name = "yaml",
+        .root_source_file = .{.path = "src/yaml.zig"},
+        .target = target,
+        .optimize = optimize,
+    });
     lib.install();
 
-    var yaml_tests = b.addTest("src/yaml.zig");
-    yaml_tests.setBuildMode(mode);
+    var yaml_tests = b.addTest(.{
+        .name = "yaml",
+        .kind = .test_exe,
+        .root_source_file = .{.path = "src/yaml.zig"},
+        .target = target,
+        .optimize = optimize,
+    }); 
+ 
+    const example = b.addExecutable(.{
+        .name = "yaml",
+        .root_source_file = .{.path = "examples/yaml.zig"},
+        .target = target,
+        .optimize = optimize,
+    });
 
-    const example = b.addExecutable("yaml", "examples/yaml.zig");
-    example.setBuildMode(mode);
-    example.addPackagePath("yaml", "src/yaml.zig");
+    var yaml_module = module(b,"./");
+    example.addModule("yaml", yaml_module);
 
     const example_opts = b.addOptions();
     example.addOptions("build_options", example_opts);
@@ -40,9 +56,14 @@ pub fn build(b: *std.build.Builder) void {
     const test_step = b.step("test", "Run library tests");
     test_step.dependOn(&yaml_tests.step);
 
-    var e2e_tests = b.addTest("test/test.zig");
-    e2e_tests.setBuildMode(mode);
-    e2e_tests.addPackagePath("yaml", "src/yaml.zig");
+    var e2e_tests = b.addTest(.{
+        .name = "e2e_tests",
+        .kind = .test_exe,
+        .root_source_file = .{.path = "test/test.zig"},
+        .target = target,
+        .optimize = optimize,
+    }); 
+    e2e_tests.addModule("yaml", yaml_module);
     test_step.dependOn(&e2e_tests.step);
 
     const cwd = std.fs.cwd();
@@ -51,11 +72,38 @@ pub fn build(b: *std.build.Builder) void {
         
         const gen = GenerateStep.init(b,"yamlTest.zig",create_only_yaml_tests,enable_silent_yaml);
         test_step.dependOn(&gen.step);
-        var full_yaml_tests = b.addTest("zig-cache/yamlTest.zig");
-        full_yaml_tests.addPackagePath("yaml", "src/yaml.zig");
+        var full_yaml_tests = b.addTest(.{
+        .name = "full_yaml_tests",
+        .kind = .test_exe,
+        .root_source_file = .{.path = "zig-cache/yamlTest.zig"},
+        .target = target,
+        .optimize = optimize,
+    });
+        full_yaml_tests.addModule("yaml", yaml_module);
         test_step.dependOn(&full_yaml_tests.step);
     } else |_| {
         std.debug.print("No 'data' directory with YAML tests provided\n",.{});
     }
+}
+
+var cached_pkg: ?*std.Build.Module = null;
+
+pub fn module(b: *std.Build, path: []const u8) *std.Build.Module {
+    if (cached_pkg == null) {
+
+        const yaml_path = std.fs.path.join(b.allocator,&[_][]const u8{
+            path,
+            "src/yaml.zig"
+        }) catch unreachable;
+
+        const yaml_module = b.createModule(.{
+            .source_file = .{ .path = yaml_path },
+            .dependencies = &.{ },
+        });
+
+        cached_pkg = yaml_module;
+    }
+
+    return cached_pkg.?;
 }
 
