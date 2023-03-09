@@ -41,7 +41,6 @@ pub const GenerateStep = struct {
     pub fn init(builder: *Builder, out_path: []const u8, build_only: []const []const u8, silent_mode: bool) *GenerateStep {
         const self = builder.allocator.create(GenerateStep) catch unreachable;
         const full_out_path = path.join(builder.allocator, &[_][]const u8{
-            builder.build_root.path.?,
             builder.cache_root.path.?,
             out_path,
         }) catch unreachable;

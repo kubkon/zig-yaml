@@ -2,7 +2,7 @@ const std = @import("std");
 const mem = std.mem;
 const testing = std.testing;
 
-const yaml_mod = @import("../yaml.zig");
+const yaml_mod = @import("yaml");
 const Yaml = yaml_mod.Yaml;
 
 test "simple list" {

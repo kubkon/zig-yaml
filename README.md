@@ -94,7 +94,7 @@ finally: [ 8.17, 19.78, 17, 21  ]
 To test against the YAML 1.2 compatibility tests, first obtain the tests from https://github.com/yaml/yaml-test-suite.
 Follow the instructions to obtain the `data` directory which contains all of the test cases. 
 Copy this directory into the `test` folder where `generator.zig` is located.
-Running `zig build test` will now generate test cases for the YAML 1.2 compatibility tests. They can be found in the zig-cache in a file named `yamlTest.zig`.
+Running `zig build test -Denable-spec-tests` will now generate test cases for the YAML 1.2 compatibility tests. They can be found in the zig-cache in a file named `yamlTest.zig`.
 
 The test cases have the following format.
 

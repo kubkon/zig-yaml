@@ -503,5 +503,5 @@ pub fn stringify(allocator: Allocator, input: anytype, writer: anytype) !void {
 test {
     std.testing.refAllDecls(Tokenizer);
     std.testing.refAllDecls(parse);
-    _ = @import("yaml/test.zig");
+    //_ = @import("yaml/test.zig");
 }
