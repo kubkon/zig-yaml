@@ -74,7 +74,7 @@ pub const Value = union(enum) {
 
                 const first = list[0];
                 if (first.isCompound()) {
-                    for (list) |elem, i| {
+                    for (list, 0..) |elem, i| {
                         try writer.writeByteNTimes(' ', args.indentation);
                         try writer.writeAll("- ");
                         try elem.stringify(writer, .{
@@ -89,7 +89,7 @@ pub const Value = union(enum) {
                 }
 
                 try writer.writeAll("[ ");
-                for (list) |elem, i| {
+                for (list, 0..) |elem, i| {
                     try elem.stringify(writer, args);
                     if (i < len - 1) {
                         try writer.writeAll(", ");
@@ -180,7 +180,7 @@ pub const Value = union(enum) {
                 out_list.appendAssumeCapacity(value);
             }
 
-            return Value{ .list = out_list.toOwnedSlice() };
+            return Value{ .list = try out_list.toOwnedSlice() };
         } else if (node.cast(Node.Value)) |value| {
             const raw = tree.getRaw(node.start, node.end);
 
@@ -221,7 +221,7 @@ pub const Value = union(enum) {
                     }
                 }
 
-                return Value{ .list = list.toOwnedSlice() };
+                return Value{ .list = try list.toOwnedSlice() };
             } else {
                 var map = Map.init(arena);
                 errdefer map.deinit();
@@ -275,7 +275,7 @@ pub const Value = union(enum) {
                         }
                     }
 
-                    return Value{ .list = list.toOwnedSlice() };
+                    return Value{ .list = try list.toOwnedSlice() };
                 },
                 else => {
                     @compileError("Unhandled type: {s}" ++ @typeName(@TypeOf(input)));
@@ -350,7 +350,7 @@ pub const Yaml = struct {
         switch (@typeInfo(T)) {
             .Array => |info| {
                 var parsed: T = undefined;
-                for (self.docs.items) |doc, i| {
+                for (self.docs.items, 0..) |doc, i| {
                     parsed[i] = try self.parseValue(info.child, doc);
                 }
                 return parsed;
@@ -359,7 +359,7 @@ pub const Yaml = struct {
                 switch (info.size) {
                     .Slice => {
                         var parsed = try self.arena.allocator().alloc(info.child, self.docs.items.len);
-                        for (self.docs.items) |doc, i| {
+                        for (self.docs.items, 0..) |doc, i| {
                             parsed[i] = try self.parseValue(info.child, doc);
                         }
                         return parsed;
@@ -399,7 +399,7 @@ pub const Yaml = struct {
 
         if (union_info.tag_type) |_| {
             inline for (union_info.fields) |field| {
-                if (self.parseValue(field.field_type, value)) |u_value| {
+                if (self.parseValue(field.type, value)) |u_value| {
                     return @unionInit(T, field.name, u_value);
                 } else |err| {
                     if (@as(@TypeOf(err) || error{TypeMismatch}, err) != error.TypeMismatch) return err;
@@ -426,16 +426,16 @@ pub const Yaml = struct {
                 break :blk map.get(field_name);
             };
 
-            if (@typeInfo(field.field_type) == .Optional) {
-                @field(parsed, field.name) = try self.parseOptional(field.field_type, value);
+            if (@typeInfo(field.type) == .Optional) {
+                @field(parsed, field.name) = try self.parseOptional(field.type, value);
                 continue;
             }
 
             const unwrapped = value orelse {
-                log.err("missing struct field: {s}: {s}", .{ field.name, @typeName(field.field_type) });
+                log.err("missing struct field: {s}: {s}", .{ field.name, @typeName(field.type) });
                 return error.StructFieldMissing;
             };
-            @field(parsed, field.name) = try self.parseValue(field.field_type, unwrapped);
+            @field(parsed, field.name) = try self.parseValue(field.type, unwrapped);
         }
 
         return parsed;
@@ -452,7 +452,7 @@ pub const Yaml = struct {
                 }
 
                 var parsed = try arena.alloc(ptr_info.child, value.list.len);
-                for (value.list) |elem, i| {
+                for (value.list, 0..) |elem, i| {
                     parsed[i] = try self.parseValue(ptr_info.child, elem);
                 }
                 return parsed;
@@ -466,7 +466,7 @@ pub const Yaml = struct {
         if (array_info.len != list.len) return error.ArraySizeMismatch;
 
         var parsed: T = undefined;
-        for (list) |elem, i| {
+        for (list, 0..) |elem, i| {
             parsed[i] = try self.parseValue(array_info.child, elem);
         }
 
@@ -474,7 +474,7 @@ pub const Yaml = struct {
     }
 
     pub fn stringify(self: Yaml, writer: anytype) !void {
-        for (self.docs.items) |doc, i| {
+        for (self.docs.items, 0..) |doc, i| {
             try writer.writeAll("---");
             if (self.tree.?.getDirective(i)) |directive| {
                 try writer.print(" !{s}", .{directive});

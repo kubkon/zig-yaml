@@ -1,20 +1,27 @@
 const std = @import("std");
 
-pub fn build(b: *std.build.Builder) void {
-    const mode = b.standardReleaseOptions();
+pub fn build(b: *std.Build) void {
+    const target = b.standardTargetOptions(.{});
+    const optimize = b.standardOptimizeOption(.{});
 
     const enable_logging = b.option(bool, "log", "Whether to enable logging") orelse false;
+    const yaml_module = b.createModule(.{
+        .source_file = std.build.FileSource{ .path = "src/yaml.zig" },
+    });
 
-    const lib = b.addStaticLibrary("yaml", "src/yaml.zig");
-    lib.setBuildMode(mode);
-    lib.install();
+    var yaml_tests = b.addTest(.{
+        .root_source_file = .{ .path = "src/yaml.zig" },
+        .target = target,
+        .optimize = optimize,
+    });
 
-    var yaml_tests = b.addTest("src/yaml.zig");
-    yaml_tests.setBuildMode(mode);
-
-    const example = b.addExecutable("yaml", "examples/yaml.zig");
-    example.setBuildMode(mode);
-    example.addPackagePath("yaml", "src/yaml.zig");
+    const example = b.addExecutable(.{
+        .name = "yaml",
+        .root_source_file = .{ .path = "examples/yaml.zig" },
+        .target = target,
+        .optimize = optimize,
+    });
+    example.addModule("yaml", yaml_module);
 
     const example_opts = b.addOptions();
     example.addOptions("build_options", example_opts);
@@ -34,8 +41,11 @@ pub fn build(b: *std.build.Builder) void {
     const test_step = b.step("test", "Run library tests");
     test_step.dependOn(&yaml_tests.step);
 
-    var e2e_tests = b.addTest("test/test.zig");
-    e2e_tests.setBuildMode(mode);
-    e2e_tests.addPackagePath("yaml", "src/yaml.zig");
+    var e2e_tests = b.addTest(.{
+        .root_source_file = .{ .path = "test/test.zig" },
+        .target = target,
+        .optimize = optimize,
+    });
+    e2e_tests.addModule("yaml", yaml_module);
     test_step.dependOn(&e2e_tests.step);
 }
