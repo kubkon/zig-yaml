@@ -27,9 +27,9 @@ pub fn build(b: *std.Build) void {
     example.addOptions("build_options", example_opts);
     example_opts.addOption(bool, "enable_logging", enable_logging);
 
-    example.install();
+    b.installArtifact(example);
 
-    const run_cmd = example.run();
+    const run_cmd = b.addRunArtifact(example);
     run_cmd.step.dependOn(b.getInstallStep());
     if (b.args) |args| {
         run_cmd.addArgs(args);
@@ -39,7 +39,7 @@ pub fn build(b: *std.Build) void {
     run_step.dependOn(&run_cmd.step);
 
     const test_step = b.step("test", "Run library tests");
-    test_step.dependOn(&yaml_tests.step);
+    test_step.dependOn(&b.addRunArtifact(yaml_tests).step);
 
     var e2e_tests = b.addTest(.{
         .root_source_file = .{ .path = "test/test.zig" },
@@ -47,5 +47,5 @@ pub fn build(b: *std.Build) void {
         .optimize = optimize,
     });
     e2e_tests.addModule("yaml", yaml_module);
-    test_step.dependOn(&e2e_tests.step);
+    test_step.dependOn(&b.addRunArtifact(e2e_tests).step);
 }
