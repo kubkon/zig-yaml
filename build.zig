@@ -5,7 +5,7 @@ pub fn build(b: *std.Build) void {
     const optimize = b.standardOptimizeOption(.{});
 
     const enable_logging = b.option(bool, "log", "Whether to enable logging") orelse false;
-    const yaml_module = b.createModule(.{
+    const yaml_module = b.addModule("yaml", .{
         .source_file = std.build.FileSource{ .path = "src/yaml.zig" },
     });
 
