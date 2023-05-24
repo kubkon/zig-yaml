@@ -264,9 +264,15 @@ pub fn next(self: *Tokenizer) Token {
             },
 
             .literal => switch (c) {
-                '\r', '\n', ' ', '\'', '"', ',', ':', ']', '}' => {
+                '\r', '\n', ' ', '\'', '"', ',', ']', '}' => {
                     result.id = .literal;
                     break;
+                },
+                ':' => {
+                    result.id = .literal;
+                    if (self.matchesPattern(": ") or self.matchesPattern(":\n")) {
+                        break;
+                    }
                 },
                 else => {
                     result.id = .literal;
@@ -570,6 +576,18 @@ test "quoted literals" {
         .single_quoted,
         .new_line,
         .double_quoted,
+        .eof,
+    });
+}
+
+test "literal with colon" {
+    try testExpected(
+        \\string: a:bc
+    , &[_]Token.Id{
+        .literal,
+        .map_value_ind,
+        .space,
+        .literal,
         .eof,
     });
 }
