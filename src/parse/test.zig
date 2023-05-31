@@ -324,17 +324,40 @@ test "map of list of maps" {
     }
 }
 
-test "list of lists" {
+test "list of bracketed lists" {
     const source =
         \\- [name        , hr, avg  ]
         \\- [Mark McGwire , 65, 0.278]
         \\- [Sammy Sosa   , 63, 0.288]
     ;
-
     var tree = Tree.init(testing.allocator);
     defer tree.deinit();
     try tree.parse(source);
+    try testLoL(&tree);
+}
 
+test "list of hyphened lists" {
+    const source =
+        \\-
+        \\  - name
+        \\  - hr
+        \\  - avg
+        \\-
+        \\  - Mark McGwire
+        \\  - 65
+        \\  - 0.278
+        \\-
+        \\  - Sammy Sosa
+        \\  - 63
+        \\  - 0.288
+    ;
+    var tree = Tree.init(testing.allocator);
+    defer tree.deinit();
+    try tree.parse(source);
+    try testLoL(&tree);
+}
+
+fn testLoL(tree: *Tree) !void {
     try testing.expectEqual(tree.docs.items.len, 1);
 
     const doc = tree.docs.items[0].cast(Node.Doc).?;
@@ -701,10 +724,10 @@ test "simple list" {
 }
 
 test "list indentation matters" {
-    try parseSuccess(
+    try parseError(
         \\  - a
         \\- b
-    );
+    , error.UnexpectedToken);
 
     try parseSuccess(
         \\- a
