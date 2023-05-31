@@ -135,6 +135,11 @@ pub fn next(self: *Tokenizer) Token {
                     result.id = .seq_item_ind;
                     self.index += "- ".len;
                     break;
+                } else if (self.matchesPattern("-\n")) {
+                    result.id = .seq_item_ind;
+                    // we do not skip the newline
+                    self.index += "-".len;
+                    break;
                 } else {
                     state = .literal;
                 },
