@@ -22,7 +22,7 @@ pub const YamlError = error{
 } || ParseError || std.fmt.ParseIntError;
 
 pub const List = []Value;
-pub const Map = std.StringHashMap(Value);
+pub const Map = std.StringArrayHashMap(Value);
 
 pub const Value = union(enum) {
     empty,
@@ -102,11 +102,7 @@ pub const Value = union(enum) {
                 if (len == 0) return;
 
                 var i: usize = 0;
-                var it = map.iterator();
-                while (it.next()) |entry| {
-                    const key = entry.key_ptr.*;
-                    const value = entry.value_ptr.*;
-
+                for (map.keys(), map.values()) |key, value| {
                     if (!args.should_inline_first_key or i != 0) {
                         try writer.writeByteNTimes(' ', args.indentation);
                     }
@@ -154,7 +150,7 @@ pub const Value = union(enum) {
         } else if (node.cast(Node.Map)) |map| {
             // TODO use ContextAdapted HashMap and do not duplicate keys, intern
             // in a contiguous string buffer.
-            var out_map = std.StringHashMap(Value).init(arena);
+            var out_map = std.StringArrayHashMap(Value).init(arena);
             try out_map.ensureUnusedCapacity(math.cast(u32, map.values.items.len) orelse return error.Overflow);
 
             for (map.values.items) |entry| {
