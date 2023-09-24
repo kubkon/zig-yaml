@@ -16,7 +16,7 @@ const usage =
     \\
 ;
 
-var log_scopes: std.ArrayList([]const u8) = std.ArrayList([]const u8).init(gpa);
+var log_scopes: std.ArrayList([]const u8) = std.ArrayList([]const u8).init(gpa.allocator());
 
 pub fn log(
     comptime level: std.log.Level,
