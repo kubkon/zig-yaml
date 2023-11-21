@@ -9,7 +9,7 @@ pub fn build(b: *std.Build) void {
         .source_file = std.build.FileSource{ .path = "src/yaml.zig" },
     });
 
-    var yaml_tests = b.addTest(.{
+    const yaml_tests = b.addTest(.{
         .root_source_file = .{ .path = "src/yaml.zig" },
         .target = target,
         .optimize = optimize,
