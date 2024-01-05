@@ -6,7 +6,7 @@ pub fn build(b: *std.Build) void {
 
     const enable_logging = b.option(bool, "log", "Whether to enable logging") orelse false;
     const yaml_module = b.addModule("yaml", .{
-        .source_file = std.build.FileSource{ .path = "src/yaml.zig" },
+        .root_source_file = std.Build.LazyPath{ .path = "src/yaml.zig" },
     });
 
     const yaml_tests = b.addTest(.{
@@ -21,10 +21,10 @@ pub fn build(b: *std.Build) void {
         .target = target,
         .optimize = optimize,
     });
-    example.addModule("yaml", yaml_module);
+    example.root_module.addImport("yaml", yaml_module);
 
     const example_opts = b.addOptions();
-    example.addOptions("build_options", example_opts);
+    example.root_module.addOptions("build_options", example_opts);
     example_opts.addOption(bool, "enable_logging", enable_logging);
 
     b.installArtifact(example);
@@ -46,6 +46,6 @@ pub fn build(b: *std.Build) void {
         .target = target,
         .optimize = optimize,
     });
-    e2e_tests.addModule("yaml", yaml_module);
+    e2e_tests.root_module.addImport("yaml", yaml_module);
     test_step.dependOn(&b.addRunArtifact(e2e_tests).step);
 }
