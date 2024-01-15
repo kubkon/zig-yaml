@@ -202,6 +202,54 @@ test "typed nested structs" {
     try testing.expectEqualStrings("wait, what?", simple.a.c);
 }
 
+test "typed union with nested struct" {
+    const source =
+        \\a:
+        \\  b: hello there
+    ;
+
+    var yaml = try Yaml.load(testing.allocator, source);
+    defer yaml.deinit();
+
+    const simple = try yaml.parse(union(enum) {
+        tag_a: struct {
+            a: struct {
+                b: []const u8,
+            },
+        },
+        tag_c: struct {
+            c: struct {
+                d: []const u8,
+            },
+        },
+    });
+    try testing.expectEqualStrings("hello there", simple.tag_a.a.b);
+}
+
+test "typed union with nested struct 2" {
+    const source =
+        \\c:
+        \\  d: hello there
+    ;
+
+    var yaml = try Yaml.load(testing.allocator, source);
+    defer yaml.deinit();
+
+    const simple = try yaml.parse(union(enum) {
+        tag_a: struct {
+            a: struct {
+                b: []const u8,
+            },
+        },
+        tag_c: struct {
+            c: struct {
+                d: []const u8,
+            },
+        },
+    });
+    try testing.expectEqualStrings("hello there", simple.tag_c.c.d);
+}
+
 test "single quoted string" {
     const source =
         \\- 'hello'
