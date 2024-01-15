@@ -397,8 +397,10 @@ pub const Yaml = struct {
             inline for (union_info.fields) |field| {
                 if (self.parseValue(field.type, value)) |u_value| {
                     return @unionInit(T, field.name, u_value);
-                } else |err| {
-                    if (@as(@TypeOf(err) || error{TypeMismatch}, err) != error.TypeMismatch) return err;
+                } else |err| switch (err) {
+                    error.TypeMismatch => {},
+                    error.StructFieldMissing => {},
+                    else => return err,
                 }
             }
         } else return error.UntaggedUnion;
