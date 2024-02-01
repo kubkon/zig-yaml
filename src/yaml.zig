@@ -181,8 +181,7 @@ pub const Value = union(enum) {
             const raw = tree.getRaw(node.start, node.end);
 
             try_int: {
-                // TODO infer base for int
-                const int = std.fmt.parseInt(i64, raw, 10) catch break :try_int;
+                const int = std.fmt.parseInt(i64, raw, 0) catch break :try_int;
                 return Value{ .int = int };
             }
 
