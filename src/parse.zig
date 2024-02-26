@@ -516,12 +516,31 @@ const Parser = struct {
             node.values.deinit(self.allocator);
         }
 
-        log.debug("(list) begin {s}@{d}", .{ @tagName(self.tree.tokens[node.base.start].id), node.base.start });
+        const first_col = self.getCol(node.base.start);
+
+        log.debug("(list {d}) begin {s}@{d}", .{
+            first_col,
+            @tagName(self.tree.tokens[node.base.start].id),
+            node.base.start,
+        });
 
         while (true) {
             self.eatCommentsAndSpace(&.{});
 
-            _ = self.eatToken(.seq_item_ind, &.{}) orelse break;
+            const pos = self.eatToken(.seq_item_ind, &.{}) orelse {
+                log.debug("(list {d}) break", .{first_col});
+                break;
+            };
+            const cur_col = self.getCol(pos);
+            if (cur_col < first_col) {
+                log.debug("(list {d}) << break", .{first_col});
+                // this hyphen belongs to an outer list
+                self.token_it.seekBy(-1);
+                // this will end this list
+                break;
+            }
+            //  an inner list will be parsed by self.value() so
+            //  checking for  cur_col > first_col is not necessary here
 
             const val = (try self.value()) orelse return error.MalformedYaml;
             try node.values.append(self.allocator, val);
@@ -529,7 +548,11 @@ const Parser = struct {
 
         node.base.end = self.token_it.pos - 1;
 
-        log.debug("(list) end {s}@{d}", .{ @tagName(self.tree.tokens[node.base.end].id), node.base.end });
+        log.debug("(list {d}) end {s}@{d}", .{
+            first_col,
+            @tagName(self.tree.tokens[node.base.end].id),
+            node.base.end,
+        });
 
         return &node.base;
     }
@@ -623,7 +646,7 @@ const Parser = struct {
     fn eatCommentsAndSpace(self: *Parser, comptime exclusions: []const Token.Id) void {
         log.debug("eatCommentsAndSpace", .{});
         outer: while (self.token_it.next()) |token| {
-            log.debug("  (token '{s}')", .{@tagName(token.id)});
+            log.debug("  (token '{s}'@{d})", .{ @tagName(token.id), self.token_it.pos - 1 });
             switch (token.id) {
                 .comment, .space, .new_line => |space| {
                     inline for (exclusions) |excl| {
@@ -650,7 +673,7 @@ const Parser = struct {
             log.debug("  (found at {d})", .{pos});
             return pos;
         } else {
-            log.debug("  (not found)", .{});
+            log.debug("  (not found, '{s}'@{d})", .{ @tagName(token.id), pos });
             self.token_it.seekBy(-1);
             return null;
         }
