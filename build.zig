@@ -6,18 +6,18 @@ pub fn build(b: *std.Build) void {
 
     const enable_logging = b.option(bool, "log", "Whether to enable logging") orelse false;
     const yaml_module = b.addModule("yaml", .{
-        .root_source_file = std.Build.LazyPath{ .path = "src/yaml.zig" },
+        .root_source_file = b.path("src/yaml.zig"),
     });
 
     const yaml_tests = b.addTest(.{
-        .root_source_file = .{ .path = "src/yaml.zig" },
+        .root_source_file = b.path("src/yaml.zig"),
         .target = target,
         .optimize = optimize,
     });
 
     const example = b.addExecutable(.{
         .name = "yaml",
-        .root_source_file = .{ .path = "examples/yaml.zig" },
+        .root_source_file = b.path("examples/yaml.zig"),
         .target = target,
         .optimize = optimize,
     });
@@ -42,7 +42,7 @@ pub fn build(b: *std.Build) void {
     test_step.dependOn(&b.addRunArtifact(yaml_tests).step);
 
     var e2e_tests = b.addTest(.{
-        .root_source_file = .{ .path = "test/test.zig" },
+        .root_source_file = b.path("test/test.zig"),
         .target = target,
         .optimize = optimize,
     });
