@@ -52,28 +52,32 @@ pub fn create(owner: *std.Build) *SpecTest {
     return spec_test;
 }
 
-/// Walk the 'data' dir, follow the symlinks, emit the file into the cache
 fn make(step: *Step, prog_node: std.Progress.Node) !void {
     _ = prog_node;
 
     const spec_test: *SpecTest = @fieldParentPtr("step", step);
     const b = step.owner;
 
+    const cwd = std.fs.cwd();
+    cwd.access("test/yaml-test-suite/tags", .{}) catch {
+        return spec_test.step.fail("Testfiles not found, make sure you have loaded the submodule.", .{});
+    };
+    if (b.host.result.os.tag == .windows) {
+        return spec_test.step.fail("Windows does not support symlinks in git properly, can't run testsuite.", .{});
+    }
+
     var output = std.ArrayList(u8).init(b.allocator);
     const writer = output.writer();
 
     try writer.writeAll(preamble);
 
-    //read the tags, follow the links, generate the tests
     const root_data_path = fs.path.join(b.allocator, &[_][]const u8{
         b.build_root.path.?,
         "test/yaml-test-suite",
     }) catch unreachable;
 
-    //open the root directory, which 'should' contain the tags folder.
     const root_data_dir = try std.fs.openDirAbsolute(root_data_path, .{});
 
-    //then open the tags subdirectory for iterating
     var itdir = try root_data_dir.openDir("tags", .{ .iterate = true, .access_sub_paths = true });
 
     //we now want to walk the directory, including the symlinked folders, there should be no loops
@@ -115,6 +119,7 @@ fn make(step: *Step, prog_node: std.Progress.Node) !void {
 }
 
 fn emitTest(alloc: mem.Allocator, output: *std.ArrayList(u8), entry: fs.Dir.Walker.Entry) !void {
+    std.debug.print("{s}\n", .{entry.path});
     if (entry.kind == .sym_link) {
         // const real_path = try entry.dir.realpathAlloc(alloc, entry.basename);
         const name_file_path = fs.path.join(alloc, &[_][]const u8{

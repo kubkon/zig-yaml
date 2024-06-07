@@ -55,5 +55,4 @@ pub fn build(b: *std.Build) void {
         const gen = SpecTest.create(b);
         test_step.dependOn(&gen.step);
     }
-
 }
