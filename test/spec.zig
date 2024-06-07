@@ -12,13 +12,6 @@ pub const base_id: Step.Id = .custom;
 step: Step,
 output_file: std.Build.GeneratedFile,
 
-pub const Options = struct {
-    module_name: []const u8,
-    module: *std.Build.Module,
-    target: std.Build.ResolvedTarget,
-    optimize: std.builtin.OptimizeMode,
-};
-
 const preamble =
     \\// This file is generated from the YAML 1.2 test database.
     \\
@@ -50,6 +43,10 @@ pub fn create(owner: *std.Build) *SpecTest {
         .output_file = std.Build.GeneratedFile{ .step = &spec_test.step },
     };
     return spec_test;
+}
+
+pub fn path(spec_test: *SpecTest) std.Build.LazyPath {
+    return std.Build.LazyPath{ .generated = .{ .file = &spec_test.output_file } };
 }
 
 fn make(step: *Step, prog_node: std.Progress.Node) !void {
@@ -87,7 +84,7 @@ fn make(step: *Step, prog_node: std.Progress.Node) !void {
     loop: {
         while (walker.next()) |entry| {
             if (entry) |e| {
-                if (emitTest(b.allocator, &output, e)) |_| {} else |_| {}
+                if (emitTest(b.allocator, &output, e, root_data_path)) |_| {} else |_| {}
             } else {
                 break :loop;
             }
@@ -118,10 +115,9 @@ fn make(step: *Step, prog_node: std.Progress.Node) !void {
     spec_test.output_file.path = try b.cache_root.join(b.allocator, &.{sub_path});
 }
 
-fn emitTest(alloc: mem.Allocator, output: *std.ArrayList(u8), entry: fs.Dir.Walker.Entry) !void {
+fn emitTest(alloc: mem.Allocator, output: *std.ArrayList(u8), entry: fs.Dir.Walker.Entry, root_data_path: []const u8) !void {
     std.debug.print("{s}\n", .{entry.path});
     if (entry.kind == .sym_link) {
-        // const real_path = try entry.dir.realpathAlloc(alloc, entry.basename);
         const name_file_path = fs.path.join(alloc, &[_][]const u8{
             entry.basename,
             "===",
@@ -132,11 +128,13 @@ fn emitTest(alloc: mem.Allocator, output: *std.ArrayList(u8), entry: fs.Dir.Walk
         defer alloc.free(name);
 
         const in_file_path = fs.path.join(alloc, &[_][]const u8{
+            root_data_path,
+            "tags",
             entry.path,
             "in.yaml",
         }) catch unreachable;
 
-        const data = std.fmt.allocPrint(alloc, "test \"{s} - {}\" {{\n    const yaml = try loadFromFile(\"{s}\");\n    defer yaml.deinit();\n}}\n\n", .{ entry.path, std.zig.fmtEscapes(name[0 .. name.len - 1]), in_file_path }) catch unreachable;
+        const data = std.fmt.allocPrint(alloc, "test \"{s} - {}\" {{\n    var yaml = try loadFromFile(\"{s}\");\n    defer yaml.deinit();\n}}\n\n", .{ entry.path, std.zig.fmtEscapes(name[0 .. name.len - 1]), in_file_path }) catch unreachable;
         defer alloc.free(data);
         try output.appendSlice(data);
     }
