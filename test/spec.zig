@@ -3,8 +3,6 @@ const Step = std.Build.Step;
 const fs = std.fs;
 const mem = std.mem;
 
-const Aegis128LMac_128 = std.crypto.auth.aegis.Aegis128LMac_128;
-
 const SpecTest = @This();
 
 pub const base_id: Step.Id = .custom;
@@ -116,15 +114,21 @@ fn make(step: *Step, prog_node: std.Progress.Node) !void {
         }
     }
 
-    const key = mem.zeroes([Aegis128LMac_128.key_length]u8);
-    var mac = Aegis128LMac_128.init(&key);
-    mac.update(output.items);
-    var bin_digest: [Aegis128LMac_128.mac_length]u8 = undefined;
-    mac.final(&bin_digest);
-    var filename: [Aegis128LMac_128.mac_length * 2 + 4]u8 = undefined;
-    _ = std.fmt.bufPrint(&filename, "{s}.zig", .{std.fmt.fmtSliceHexLower(&bin_digest)}) catch unreachable;
+    var man = b.graph.cache.obtain();
+    defer man.deinit();
 
-    const sub_path = b.pathJoin(&.{ "yaml-test-suite", &filename });
+    man.hash.addBytes(output.items);
+
+    if (try step.cacheHit(&man)) {
+        const digest = man.final();
+        spec_test.output_file.path = try b.cache_root.join(b.allocator, &.{
+            "yaml-test-suite", &digest,
+        });
+        return;
+    }
+    const digest = man.final();
+
+    const sub_path = b.pathJoin(&.{ "yaml-test-suite", &digest });
     const sub_path_dirname = fs.path.dirname(sub_path).?;
 
     b.cache_root.handle.makePath(sub_path_dirname) catch |err| {
@@ -135,6 +139,7 @@ fn make(step: *Step, prog_node: std.Progress.Node) !void {
         return step.fail("unable to write file: {}", .{err});
     };
     spec_test.output_file.path = try b.cache_root.join(b.allocator, &.{sub_path});
+    try man.writeManifest();
 }
 
 fn collectTest(alloc: mem.Allocator, entry: fs.Dir.Walker.Entry, testcases: *std.StringArrayHashMap(Testcase)) !void {
