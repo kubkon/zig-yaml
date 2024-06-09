@@ -49,6 +49,8 @@ pub fn path(spec_test: *SpecTest) std.Build.LazyPath {
     return std.Build.LazyPath{ .generated = .{ .file = &spec_test.output_file } };
 }
 
+const Testcase = struct { name: []const u8, path: []const u8, result: union(enum) { expected_output_path: []const u8, none: void }, tags: std.BufSet };
+
 fn make(step: *Step, prog_node: std.Progress.Node) !void {
     _ = prog_node;
 
@@ -63,10 +65,8 @@ fn make(step: *Step, prog_node: std.Progress.Node) !void {
         return spec_test.step.fail("Windows does not support symlinks in git properly, can't run testsuite.", .{});
     }
 
-    var output = std.ArrayList(u8).init(b.allocator);
-    const writer = output.writer();
-
-    try writer.writeAll(preamble);
+    var testcases = std.StringArrayHashMap(Testcase).init(b.allocator);
+    defer testcases.deinit();
 
     const root_data_path = fs.path.join(b.allocator, &[_][]const u8{
         b.build_root.path.?,
@@ -77,14 +77,12 @@ fn make(step: *Step, prog_node: std.Progress.Node) !void {
 
     var itdir = try root_data_dir.openDir("tags", .{ .iterate = true, .access_sub_paths = true });
 
-    //we now want to walk the directory, including the symlinked folders, there should be no loops
-    //unsure how the walker might handle loops..
     var walker = try itdir.walk(b.allocator);
     defer walker.deinit();
     loop: {
         while (walker.next()) |entry| {
             if (entry) |e| {
-                if (emitTest(b.allocator, &output, e, root_data_path)) |_| {} else |_| {}
+                if (collectTest(b.allocator, e, &testcases)) |_| {} else |_| {}
             } else {
                 break :loop;
             }
@@ -92,6 +90,15 @@ fn make(step: *Step, prog_node: std.Progress.Node) !void {
             std.debug.print("err: {}", .{err});
             break :loop;
         }
+    }
+
+    var output = std.ArrayList(u8).init(b.allocator);
+    defer output.deinit();
+    const writer = output.writer();
+    try writer.writeAll(preamble);
+
+    while (testcases.popOrNull()) |kv| {
+        try emitTest(b.allocator, &output, kv.value);
     }
 
     const key = mem.zeroes([Aegis128LMac_128.key_length]u8);
@@ -115,36 +122,76 @@ fn make(step: *Step, prog_node: std.Progress.Node) !void {
     spec_test.output_file.path = try b.cache_root.join(b.allocator, &.{sub_path});
 }
 
-fn emitTest(alloc: mem.Allocator, output: *std.ArrayList(u8), entry: fs.Dir.Walker.Entry, root_data_path: []const u8) !void {
-    std.debug.print("{s}\n", .{entry.path});
-    if (entry.kind == .sym_link) {
+fn collectTest(alloc: mem.Allocator, entry: fs.Dir.Walker.Entry, testcases: *std.StringArrayHashMap(Testcase)) !void {
+    if (entry.kind != .sym_link) {
+        return;
+    }
+    var path_components = std.fs.path.componentIterator(entry.path) catch unreachable;
+    const first_path = path_components.first().?;
+
+    var remaining_path = alloc.alloc(u8, 0) catch @panic("OOM");
+    while (path_components.next()) |component| {
+        const new_path = fs.path.join(alloc, &[_][]const u8{
+            remaining_path,
+            component.name,
+        }) catch @panic("OOM");
+        alloc.free(remaining_path);
+        remaining_path = new_path;
+    }
+
+    const result = try testcases.getOrPut(remaining_path);
+    if (!result.found_existing) {
+        const key_alloc: []u8 = try alloc.dupe(u8, remaining_path);
+        result.key_ptr.* = key_alloc;
+
+        const in_path = fs.path.join(alloc, &[_][]const u8{
+            entry.basename,
+            "in.yaml",
+        }) catch @panic("OOM");
+        const real_in_path = try entry.dir.realpathAlloc(alloc, in_path);
+
         const name_file_path = fs.path.join(alloc, &[_][]const u8{
             entry.basename,
             "===",
-        }) catch unreachable;
+        }) catch @panic("OOM");
         const name_file = entry.dir.openFile(name_file_path, .{}) catch unreachable;
         defer name_file.close();
         const name = try name_file.readToEndAlloc(alloc, std.math.maxInt(u32));
         defer alloc.free(name);
 
-        const in_file_path = fs.path.join(alloc, &[_][]const u8{
-            root_data_path,
-            "tags",
-            entry.path,
-            "in.yaml",
-        }) catch unreachable;
+        var tag_set = std.BufSet.init(alloc);
+        tag_set.insert(first_path.name) catch @panic("OOM");
 
-        const data = std.fmt.allocPrint(alloc, "test \"{s} - {}\" {{\n    var yaml = try loadFromFile(\"{s}\");\n    defer yaml.deinit();\n}}\n\n", .{ entry.path, std.zig.fmtEscapes(name[0 .. name.len - 1]), in_file_path }) catch unreachable;
-        defer alloc.free(data);
-        try output.appendSlice(data);
+        const full_name = std.fmt.allocPrint(alloc, "{s} - {s}", .{ remaining_path, name[0 .. name.len - 1] }) catch @panic("OOM");
+
+        result.value_ptr.* = .{
+            .name = full_name,
+            .path = real_in_path,
+            .result = .{ .none = {} },
+            .tags = tag_set,
+        };
+
+        const out_path = fs.path.join(alloc, &[_][]const u8{
+            entry.basename,
+            "out.yaml",
+        }) catch @panic("OOM");
+        if (canAccess(entry.dir, out_path)) {
+            const real_out_path = try entry.dir.realpathAlloc(alloc, out_path);
+            result.value_ptr.result = .{ .expected_output_path = real_out_path };
+        }
+    } else {
+        result.value_ptr.tags.insert(first_path.name) catch @panic("OOM");
     }
 }
 
-//access returns an error or is void, this will make it a bool
-//behaviour of some of the tests is determined by the presence (as opposed to contents) of a file
-fn canAccess(file_path: []const u8) bool {
-    const cwd = std.fs.cwd();
-    if (cwd.access(file_path, .{})) {
+fn emitTest(alloc: mem.Allocator, output: *std.ArrayList(u8), testcase: Testcase) !void {
+    const data = std.fmt.allocPrint(alloc, "test \"{}\" {{\n    var yaml = try loadFromFile(\"{s}\");\n    defer yaml.deinit();\n}}\n\n", .{ std.zig.fmtEscapes(testcase.name), testcase.path }) catch @panic("OOM");
+    defer alloc.free(data);
+    try output.appendSlice(data);
+}
+
+fn canAccess(dir: fs.Dir, file_path: []const u8) bool {
+    if (dir.access(file_path, .{})) {
         return true;
     } else |_| {
         return false;
