@@ -49,7 +49,7 @@ pub fn path(spec_test: *SpecTest) std.Build.LazyPath {
     return std.Build.LazyPath{ .generated = .{ .file = &spec_test.output_file } };
 }
 
-const Testcase = struct { name: []const u8, path: []const u8, result: union(enum) { expected_output_path: []const u8, none: void }, tags: std.BufSet };
+const Testcase = struct { name: []const u8, path: []const u8, result: union(enum) { expected_output_path: []const u8, error_expected, none }, tags: std.BufSet };
 
 fn make(step: *Step, prog_node: std.Progress.Node) !void {
     _ = prog_node;
@@ -175,9 +175,15 @@ fn collectTest(alloc: mem.Allocator, entry: fs.Dir.Walker.Entry, testcases: *std
             entry.basename,
             "out.yaml",
         }) catch @panic("OOM");
+        const err_path = fs.path.join(alloc, &[_][]const u8{
+            entry.basename,
+            "error",
+        }) catch @panic("OOM");
         if (canAccess(entry.dir, out_path)) {
             const real_out_path = try entry.dir.realpathAlloc(alloc, out_path);
             result.value_ptr.result = .{ .expected_output_path = real_out_path };
+        } else if (canAccess(entry.dir, err_path)) {
+            result.value_ptr.result = .{ .error_expected = {} };
         }
     } else {
         result.value_ptr.tags.insert(first_path.name) catch @panic("OOM");
