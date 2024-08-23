@@ -30,6 +30,7 @@ pub const Value = union(enum) {
     float: f64,
     string: []const u8,
     list: List,
+    boolean: bool,
     map: Map,
 
     pub fn asInt(self: Value) !i64 {
@@ -45,6 +46,11 @@ pub const Value = union(enum) {
     pub fn asString(self: Value) ![]const u8 {
         if (self != .string) return error.TypeMismatch;
         return self.string;
+    }
+
+    pub fn asBool(self: Value) !bool {
+        if (self != .boolean) return error.TypeMismatch;
+        return self.boolean;
     }
 
     pub fn asList(self: Value) !List {
@@ -68,6 +74,7 @@ pub const Value = union(enum) {
             .int => |int| return writer.print("{}", .{int}),
             .float => |float| return writer.print("{d}", .{float}),
             .string => |string| return writer.print("{s}", .{string}),
+            .boolean => |bool_val| return writer.print("{}", .{bool_val}),
             .list => |list| {
                 const len = list.len;
                 if (len == 0) return;
@@ -188,6 +195,17 @@ pub const Value = union(enum) {
             try_float: {
                 const float = std.fmt.parseFloat(f64, raw) catch break :try_float;
                 return Value{ .float = float };
+            }
+
+            const isTruthy = std.mem.eql(u8, raw, "true");
+            const isFalsy = std.mem.eql(u8, raw, "false");
+
+            if (isTruthy) {
+                return Value{ .boolean = true };
+            }
+
+            if (isFalsy) {
+                return Value{ .boolean = false };
             }
 
             return Value{ .string = try arena.dupe(u8, value.string_value.items) };
@@ -377,6 +395,7 @@ pub const Yaml = struct {
             },
             .Struct => self.parseStruct(T, try value.asMap()),
             .Union => self.parseUnion(T, value),
+            .Bool => value.asBool(),
             .Array => self.parseArray(T, try value.asList()),
             .Pointer => if (value.asList()) |list| {
                 return self.parsePointer(T, .{ .list = list });
