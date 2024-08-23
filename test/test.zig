@@ -24,8 +24,10 @@ test "simple" {
         nested: struct {
             some: []const u8,
             wick: []const u8,
+            ok: bool,
         },
         finally: [4]f16,
+        isyaml: bool,
 
         pub fn eql(self: @This(), other: @This()) bool {
             if (self.names.len != other.names.len) return false;
@@ -61,7 +63,9 @@ test "simple" {
         .nested = .{
             .some = "one",
             .wick = "john doe",
+            .ok = false,
         },
+        .isyaml = false,
         .finally = [_]f16{ 8.17, 19.78, 17, 21 },
     };
     try testing.expect(result.eql(expected));
