@@ -65,7 +65,7 @@ test "explicit doc" {
 
 test "leaf in quotes" {
     const source =
-        \\key1: no quotes
+        \\key1: no quotes, comma
         \\key2: 'single quoted'
         \\key3: "double quoted"
     ;
@@ -101,7 +101,7 @@ test "leaf in quotes" {
         const end = tree.tokens[value.base.end];
         try testing.expectEqual(start.id, .literal);
         try testing.expectEqual(end.id, .literal);
-        try testing.expectEqualStrings("no quotes", tree.source[start.start..end.end]);
+        try testing.expectEqualStrings("no quotes, comma", tree.source[start.start..end.end]);
     }
 }
 
