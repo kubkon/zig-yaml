@@ -750,6 +750,14 @@ test "empty list" {
     );
 }
 
+test "empty map" {
+    try parseSuccess(
+        \\a:
+        \\  b: {}
+        \\  c: { }
+    );
+}
+
 test "comment within a bracketed list is an error" {
     try parseError(
         \\[ # something
