@@ -462,7 +462,11 @@ const Parser = struct {
                     self.token_it.seekBy(-1);
                     break;
                 },
+                .flow_map_end => {
+                    break;
+                },
                 else => {
+                    log.err("Unhandled token in map: {}", .{key});
                     // TODO key not being a literal
                     return error.Unhandled;
                 },

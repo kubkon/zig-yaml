@@ -6,6 +6,7 @@ const testing = std.testing;
 
 buffer: []const u8,
 index: usize = 0,
+in_flow: usize = 0,
 
 pub const Token = struct {
     id: Id,
@@ -173,11 +174,13 @@ pub fn next(self: *Tokenizer) Token {
                 '[' => {
                     result.id = .flow_seq_start;
                     self.index += 1;
+                    self.in_flow += 1;
                     break;
                 },
                 ']' => {
                     result.id = .flow_seq_end;
                     self.index += 1;
+                    self.in_flow -|= 1;
                     break;
                 },
                 ':' => {
@@ -188,11 +191,13 @@ pub fn next(self: *Tokenizer) Token {
                 '{' => {
                     result.id = .flow_map_start;
                     self.index += 1;
+                    self.in_flow += 1;
                     break;
                 },
                 '}' => {
                     result.id = .flow_map_end;
                     self.index += 1;
+                    self.in_flow -|= 1;
                     break;
                 },
                 '\'' => {
@@ -264,9 +269,15 @@ pub fn next(self: *Tokenizer) Token {
             },
 
             .literal => switch (c) {
-                '\r', '\n', ' ', '\'', '"', ',', ':', ']', '}' => {
+                '\r', '\n', ' ', '\'', '"', ':', ']', '}' => {
                     result.id = .literal;
                     break;
+                },
+                ',', '[', '{' => {
+                    result.id = .literal;
+                    if (self.in_flow > 0) {
+                        break;
+                    }
                 },
                 else => {
                     result.id = .literal;
@@ -570,6 +581,37 @@ test "quoted literals" {
         .single_quoted,
         .new_line,
         .double_quoted,
+        .eof,
+    });
+}
+
+test "unquoted literals" {
+    try testExpected(
+        \\key1: helloWorld
+        \\key2: hello,world
+        \\key3: [hello,world]
+    , &[_]Token.Id{
+        // key1
+        .literal,
+        .map_value_ind,
+        .space,
+        .literal, // helloWorld
+        .new_line,
+        // key2
+        .literal,
+        .map_value_ind,
+        .space,
+        .literal, // hello,world
+        .new_line,
+        // key3
+        .literal,
+        .map_value_ind,
+        .space,
+        .flow_seq_start,
+        .literal, // hello
+        .comma,
+        .literal, // world
+        .flow_seq_end,
         .eof,
     });
 }
