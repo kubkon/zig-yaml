@@ -1,0 +1,4 @@
+[submodule "test/yaml-test-suite"]
+	path = test/yaml-test-suite
+	url = https://github.com/yaml/yaml-test-suite.git
+	branch = v2022-01-17

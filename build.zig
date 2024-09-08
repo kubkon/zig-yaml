@@ -1,4 +1,5 @@
 const std = @import("std");
+const SpecTest = @import("test/spec.zig");
 
 pub fn build(b: *std.Build) void {
     const target = b.standardTargetOptions(.{});
@@ -48,4 +49,16 @@ pub fn build(b: *std.Build) void {
     });
     e2e_tests.root_module.addImport("yaml", yaml_module);
     test_step.dependOn(&b.addRunArtifact(e2e_tests).step);
+
+    const enable_spec_tests = b.option(bool, "enable-spec-tests", "Enable YAML Test Suite") orelse false;
+    if (enable_spec_tests) {
+        const gen = SpecTest.create(b);
+        var spec_tests = b.addTest(.{
+            .root_source_file = gen.path(),
+            .target = target,
+            .optimize = optimize,
+        });
+        spec_tests.root_module.addImport("yaml", yaml_module);
+        test_step.dependOn(&b.addRunArtifact(spec_tests).step);
+    }
 }
