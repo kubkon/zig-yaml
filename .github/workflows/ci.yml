@@ -12,14 +12,30 @@ jobs:
         os: [macos, ubuntu, windows]
 
     steps:
-    - if: matrix.os == 'windows'
-      run: git config --global core.autocrlf false
-    - uses: actions/checkout@v2
-      with:
-        submodules: true
-    - uses: goto-bus-stop/setup-zig@v1
-      with:
-        version: master
-    - run: zig fmt --check src 
-    - run: zig build test
-    - run: zig build run
+      - if: matrix.os == 'windows'
+        run: git config --global core.autocrlf false
+      - uses: actions/checkout@v2
+        with:
+          submodules: true
+      - uses: mlugg/setup-zig@v1
+        with:
+          version: master
+      - run: zig fmt --check src
+      - run: zig build test
+      - run: zig build run
+  spec-test:
+    name: YAML Test Suite
+    runs-on: ${{ matrix.os }}-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos, ubuntu]
+
+    steps:
+      - uses: actions/checkout@v2
+        with:
+          submodules: true
+      - uses: mlugg/setup-zig@v1
+        with:
+          version: master
+      - run: zig build test -Denable-spec-tests

@@ -56,8 +56,8 @@ pub fn path(spec_test: *SpecTest) std.Build.LazyPath {
 
 const Testcase = struct { name: []const u8, path: []const u8, result: union(enum) { expected_output_path: []const u8, error_expected, none }, tags: std.BufSet };
 
-fn make(step: *Step, prog_node: std.Progress.Node) !void {
-    _ = prog_node;
+fn make(step: *Step, make_options: Step.MakeOptions) !void {
+    _ = make_options;
 
     const spec_test: *SpecTest = @fieldParentPtr("step", step);
     const b = step.owner;
