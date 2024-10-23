@@ -199,16 +199,18 @@ pub const Value = union(enum) {
                 return Value{ .float = float };
             }
 
-            const lower_raw = try std.ascii.allocLowerString(arena, raw);
-            for (supportedTruthyBooleanValue) |v| {
-                if (std.mem.eql(u8, v, lower_raw)) {
-                    return Value{ .boolean = true };
+            if (raw.len <= 5 and raw.len > 0) {
+                const lower_raw = try std.ascii.allocLowerString(arena, raw);
+                for (supportedTruthyBooleanValue) |v| {
+                    if (std.mem.eql(u8, v, lower_raw)) {
+                        return Value{ .boolean = true };
+                    }
                 }
-            }
 
-            for (supportedFalsyBooleanValue) |v| {
-                if (std.mem.eql(u8, v, lower_raw)) {
-                    return Value{ .boolean = false };
+                for (supportedFalsyBooleanValue) |v| {
+                    if (std.mem.eql(u8, v, lower_raw)) {
+                        return Value{ .boolean = false };
+                    }
                 }
             }
 
