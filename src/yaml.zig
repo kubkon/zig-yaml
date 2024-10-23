@@ -13,8 +13,8 @@ pub const parse = @import("parse.zig");
 const Node = parse.Node;
 const Tree = parse.Tree;
 const ParseError = parse.ParseError;
-const supportedTruthyBooleanValue: [11][]const u8 = .{ "y", "Y", "yes", "Yes", "YES", "on", "On", "ON", "true", "True", "TRUE" };
-const supportedFalsyBooleanValue: [11][]const u8 = .{ "n", "N", "no", "No", "NO", "off", "Off", "OFF", "false", "False", "FALSE" };
+const supportedTruthyBooleanValue: [4][]const u8 = .{ "y", "yes", "on", "true" };
+const supportedFalsyBooleanValue: [4][]const u8 = .{ "n", "no", "off", "false" };
 
 pub const YamlError = error{
     UnexpectedNodeType,
@@ -199,14 +199,15 @@ pub const Value = union(enum) {
                 return Value{ .float = float };
             }
 
+            const lower_raw = try std.ascii.allocLowerString(arena, raw);
             for (supportedTruthyBooleanValue) |v| {
-                if (std.mem.eql(u8, v, raw)) {
+                if (std.mem.eql(u8, v, lower_raw)) {
                     return Value{ .boolean = true };
                 }
             }
 
             for (supportedFalsyBooleanValue) |v| {
-                if (std.mem.eql(u8, v, raw)) {
+                if (std.mem.eql(u8, v, lower_raw)) {
                     return Value{ .boolean = false };
                 }
             }
