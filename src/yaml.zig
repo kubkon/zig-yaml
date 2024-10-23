@@ -13,6 +13,8 @@ pub const parse = @import("parse.zig");
 const Node = parse.Node;
 const Tree = parse.Tree;
 const ParseError = parse.ParseError;
+const supportedTruthyBooleanValue: [11][]const u8 = .{ "y", "Y", "yes", "Yes", "YES", "on", "On", "ON", "true", "True", "TRUE" };
+const supportedFalsyBooleanValue: [11][]const u8 = .{ "n", "N", "no", "No", "NO", "off", "Off", "OFF", "false", "False", "FALSE" };
 
 pub const YamlError = error{
     UnexpectedNodeType,
@@ -28,9 +30,9 @@ pub const Value = union(enum) {
     empty,
     int: i64,
     float: f64,
+    boolean: bool,
     string: []const u8,
     list: List,
-    boolean: bool,
     map: Map,
 
     pub fn asInt(self: Value) !i64 {
@@ -197,15 +199,16 @@ pub const Value = union(enum) {
                 return Value{ .float = float };
             }
 
-            const isTruthy = std.mem.eql(u8, raw, "true");
-            const isFalsy = std.mem.eql(u8, raw, "false");
-
-            if (isTruthy) {
-                return Value{ .boolean = true };
+            for (supportedTruthyBooleanValue) |v| {
+                if (std.mem.eql(u8, v, raw)) {
+                    return Value{ .boolean = true };
+                }
             }
 
-            if (isFalsy) {
-                return Value{ .boolean = false };
+            for (supportedFalsyBooleanValue) |v| {
+                if (std.mem.eql(u8, v, raw)) {
+                    return Value{ .boolean = false };
+                }
             }
 
             return Value{ .string = try arena.dupe(u8, value.string_value.items) };
@@ -388,6 +391,7 @@ pub const Yaml = struct {
     fn parseValue(self: *Yaml, comptime T: type, value: Value) Error!T {
         return switch (@typeInfo(T)) {
             .int => math.cast(T, try value.asInt()) orelse return error.Overflow,
+            .bool => self.parseBoolean(bool, value),
             .float => if (value.asFloat()) |float| {
                 return math.lossyCast(T, float);
             } else |_| {
@@ -405,6 +409,12 @@ pub const Yaml = struct {
             .optional => unreachable,
             else => error.Unimplemented,
         };
+    }
+
+    fn parseBoolean(self: *Yaml, comptime T: type, value: Value) Error!T {
+        _ = self;
+        const value_info = try value.asBool();
+        return value_info;
     }
 
     fn parseUnion(self: *Yaml, comptime T: type, value: Value) Error!T {
