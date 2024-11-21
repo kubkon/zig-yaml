@@ -3,9 +3,12 @@ numbers:
   - 10
   - -8
   - 6
+isyaml: false
+hasBoolean: NO
 nested:
   some: one
   wick: john doe
+  ok: TRUE
 finally: [ 8.17,
            19.78      , 17 ,
            21 ]
