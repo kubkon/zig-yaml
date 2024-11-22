@@ -269,13 +269,19 @@ pub fn next(self: *Tokenizer) Token {
             },
 
             .literal => switch (c) {
-                '\r', '\n', ' ', '\'', '"', ':', ']', '}' => {
+                '\r', '\n', ' ', '\'', '"', ']', '}' => {
                     result.id = .literal;
                     break;
                 },
                 ',', '[', '{' => {
                     result.id = .literal;
                     if (self.in_flow > 0) {
+                        break;
+                    }
+                },
+                ':' => {
+                    result.id = .literal;
+                    if (self.matchesPattern(": ") or self.matchesPattern(":\n") or self.matchesPattern(":\r")) {
                         break;
                     }
                 },
@@ -612,6 +618,26 @@ test "unquoted literals" {
         .comma,
         .literal, // world
         .flow_seq_end,
+        .eof,
+    });
+}
+
+test "unquoted literal containing colon" {
+    try testExpected(
+        \\key1: val:ue
+        \\key2: val::ue
+    , &[_]Token.Id{
+        // key1
+        .literal,
+        .map_value_ind,
+        .space,
+        .literal, // val:ue
+        .new_line,
+        // key2
+        .literal,
+        .map_value_ind,
+        .space,
+        .literal, // val::ue
         .eof,
     });
 }
