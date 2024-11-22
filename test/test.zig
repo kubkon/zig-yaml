@@ -55,7 +55,7 @@ test "simple" {
     defer parsed.deinit();
 
     const result = try parsed.parse(Simple);
-    const expected = .{
+    const expected = Simple{
         .names = &[_][]const u8{ "John Doe", "MacIntosh", "Jane Austin" },
         .numbers = &[_]i16{ 10, -8, 6 },
         .nested = .{
@@ -180,7 +180,7 @@ test "single lib tbd" {
     defer parsed.deinit();
 
     const result = try parsed.parse(LibTbd);
-    const expected = .{
+    const expected = LibTbd{
         .tbd_version = 4,
         .targets = &[_][]const u8{
             "x86_64-macos",
