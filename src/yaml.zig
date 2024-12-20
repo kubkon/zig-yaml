@@ -13,6 +13,8 @@ pub const parse = @import("parse.zig");
 const Node = parse.Node;
 const Tree = parse.Tree;
 const ParseError = parse.ParseError;
+const supportedTruthyBooleanValue: [4][]const u8 = .{ "y", "yes", "on", "true" };
+const supportedFalsyBooleanValue: [4][]const u8 = .{ "n", "no", "off", "false" };
 
 pub const YamlError = error{
     UnexpectedNodeType,
@@ -28,6 +30,7 @@ pub const Value = union(enum) {
     empty,
     int: i64,
     float: f64,
+    boolean: bool,
     string: []const u8,
     list: List,
     map: Map,
@@ -45,6 +48,11 @@ pub const Value = union(enum) {
     pub fn asString(self: Value) ![]const u8 {
         if (self != .string) return error.TypeMismatch;
         return self.string;
+    }
+
+    pub fn asBool(self: Value) !bool {
+        if (self != .boolean) return error.TypeMismatch;
+        return self.boolean;
     }
 
     pub fn asList(self: Value) !List {
@@ -68,6 +76,7 @@ pub const Value = union(enum) {
             .int => |int| return writer.print("{}", .{int}),
             .float => |float| return writer.print("{d}", .{float}),
             .string => |string| return writer.print("{s}", .{string}),
+            .boolean => |bool_val| return writer.print("{}", .{bool_val}),
             .list => |list| {
                 const len = list.len;
                 if (len == 0) return;
@@ -188,6 +197,21 @@ pub const Value = union(enum) {
             try_float: {
                 const float = std.fmt.parseFloat(f64, raw) catch break :try_float;
                 return Value{ .float = float };
+            }
+
+            if (raw.len <= 5 and raw.len > 0) {
+                const lower_raw = try std.ascii.allocLowerString(arena, raw);
+                for (supportedTruthyBooleanValue) |v| {
+                    if (std.mem.eql(u8, v, lower_raw)) {
+                        return Value{ .boolean = true };
+                    }
+                }
+
+                for (supportedFalsyBooleanValue) |v| {
+                    if (std.mem.eql(u8, v, lower_raw)) {
+                        return Value{ .boolean = false };
+                    }
+                }
             }
 
             return Value{ .string = try arena.dupe(u8, value.string_value.items) };
@@ -370,6 +394,7 @@ pub const Yaml = struct {
     fn parseValue(self: *Yaml, comptime T: type, value: Value) Error!T {
         return switch (@typeInfo(T)) {
             .int => math.cast(T, try value.asInt()) orelse return error.Overflow,
+            .bool => self.parseBoolean(bool, value),
             .float => if (value.asFloat()) |float| {
                 return math.lossyCast(T, float);
             } else |_| {
@@ -387,6 +412,11 @@ pub const Yaml = struct {
             .optional => unreachable,
             else => error.Unimplemented,
         };
+    }
+
+    fn parseBoolean(self: *Yaml, comptime T: type, value: Value) Error!T {
+        _ = self;
+        return value.asBool();
     }
 
     fn parseUnion(self: *Yaml, comptime T: type, value: Value) Error!T {
