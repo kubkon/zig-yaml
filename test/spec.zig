@@ -1,8 +1,9 @@
 const std = @import("std");
-const Step = std.Build.Step;
 const fs = std.fs;
 const mem = std.mem;
 
+const Allocator = mem.Allocator;
+const Step = std.Build.Step;
 const SpecTest = @This();
 
 pub const base_id: Step.Id = .custom;
@@ -79,10 +80,13 @@ fn make(step: *Step, make_options: Step.MakeOptions) !void {
         return spec_test.step.fail("Windows does not support symlinks in git properly, can't run testsuite.", .{});
     }
 
-    var testcases = std.StringArrayHashMap(Testcase).init(b.allocator);
-    defer testcases.deinit();
+    var arena_allocator = std.heap.ArenaAllocator.init(b.allocator);
+    defer arena_allocator.deinit();
+    const arena = arena_allocator.allocator();
 
-    const root_data_path = fs.path.join(b.allocator, &[_][]const u8{
+    var testcases = std.StringArrayHashMap(Testcase).init(arena);
+
+    const root_data_path = fs.path.join(arena, &[_][]const u8{
         b.build_root.path.?,
         "test/yaml-test-suite",
     }) catch unreachable;
@@ -91,13 +95,14 @@ fn make(step: *Step, make_options: Step.MakeOptions) !void {
 
     var itdir = try root_data_dir.openDir("tags", .{ .iterate = true, .access_sub_paths = true });
 
-    var walker = try itdir.walk(b.allocator);
+    var walker = try itdir.walk(arena);
     defer walker.deinit();
+
     loop: {
         while (walker.next()) |entry| {
             if (entry) |e| {
                 if (e.kind != .sym_link) continue;
-                collectTest(b.allocator, e, &testcases) catch {};
+                collectTest(arena, e, &testcases) catch {};
             } else {
                 break :loop;
             }
@@ -107,21 +112,12 @@ fn make(step: *Step, make_options: Step.MakeOptions) !void {
         }
     }
 
-    var output = std.ArrayList(u8).init(b.allocator);
-    defer output.deinit();
+    var output = std.ArrayList(u8).init(arena);
     const writer = output.writer();
     try writer.writeAll(preamble);
 
     while (testcases.popOrNull()) |kv| {
-        b.allocator.free(kv.key);
-        try emitTest(b.allocator, &output, kv.value);
-        b.allocator.free(kv.value.name);
-        var tags = kv.value.tags;
-        tags.deinit();
-        b.allocator.free(kv.value.path);
-        if (kv.value.result == .expected_output_path) {
-            b.allocator.free(kv.value.result.expected_output_path);
-        }
+        try emitTest(arena, &output, kv.value);
     }
 
     var man = b.graph.cache.obtain();
@@ -131,7 +127,7 @@ fn make(step: *Step, make_options: Step.MakeOptions) !void {
 
     if (try step.cacheHit(&man)) {
         const digest = man.final();
-        spec_test.output_file.path = try b.cache_root.join(b.allocator, &.{
+        spec_test.output_file.path = try b.cache_root.join(arena, &.{
             "yaml-test-suite", &digest,
         });
         return;
@@ -148,48 +144,49 @@ fn make(step: *Step, make_options: Step.MakeOptions) !void {
     b.cache_root.handle.writeFile(.{ .sub_path = sub_path, .data = output.items }) catch |err| {
         return step.fail("unable to write file: {}", .{err});
     };
-    spec_test.output_file.path = try b.cache_root.join(b.allocator, &.{sub_path});
+    spec_test.output_file.path = try b.cache_root.join(arena, &.{sub_path});
     try man.writeManifest();
 }
 
-fn collectTest(alloc: mem.Allocator, entry: fs.Dir.Walker.Entry, testcases: *std.StringArrayHashMap(Testcase)) !void {
+fn collectTest(arena: Allocator, entry: fs.Dir.Walker.Entry, testcases: *std.StringArrayHashMap(Testcase)) !void {
     var path_components = std.fs.path.componentIterator(entry.path) catch unreachable;
     const first_path = path_components.first().?;
 
-    var remaining_path = alloc.alloc(u8, 0) catch @panic("OOM");
+    var remaining_path = arena.alloc(u8, 0) catch @panic("OOM");
     while (path_components.next()) |component| {
-        const new_path = fs.path.join(alloc, &[_][]const u8{
+        const new_path = fs.path.join(arena, &[_][]const u8{
             remaining_path,
             component.name,
         }) catch @panic("OOM");
-        alloc.free(remaining_path);
         remaining_path = new_path;
     }
 
     const result = try testcases.getOrPut(remaining_path);
     if (!result.found_existing) {
-        const key_alloc: []u8 = try alloc.dupe(u8, remaining_path);
+        const key_alloc: []u8 = try arena.dupe(u8, remaining_path);
         result.key_ptr.* = key_alloc;
 
-        const in_path = fs.path.join(alloc, &[_][]const u8{
+        const in_path = fs.path.join(arena, &[_][]const u8{
             entry.basename,
             "in.yaml",
         }) catch @panic("OOM");
-        const real_in_path = try entry.dir.realpathAlloc(alloc, in_path);
+        const real_in_path = try entry.dir.realpathAlloc(arena, in_path);
 
-        const name_file_path = fs.path.join(alloc, &[_][]const u8{
+        const name_file_path = fs.path.join(arena, &[_][]const u8{
             entry.basename,
             "===",
         }) catch @panic("OOM");
         const name_file = entry.dir.openFile(name_file_path, .{}) catch unreachable;
         defer name_file.close();
-        const name = try name_file.readToEndAlloc(alloc, std.math.maxInt(u32));
-        defer alloc.free(name);
+        const name = try name_file.readToEndAlloc(arena, std.math.maxInt(u32));
 
-        var tag_set = std.BufSet.init(alloc);
+        var tag_set = std.BufSet.init(arena);
         tag_set.insert(first_path.name) catch @panic("OOM");
 
-        const full_name = std.fmt.allocPrint(alloc, "{s} - {s}", .{ remaining_path, name[0 .. name.len - 1] }) catch @panic("OOM");
+        const full_name = std.fmt.allocPrint(arena, "{s} - {s}", .{
+            remaining_path,
+            name[0 .. name.len - 1],
+        }) catch @panic("OOM");
 
         result.value_ptr.* = .{
             .name = full_name,
@@ -198,16 +195,16 @@ fn collectTest(alloc: mem.Allocator, entry: fs.Dir.Walker.Entry, testcases: *std
             .tags = tag_set,
         };
 
-        const out_path = fs.path.join(alloc, &[_][]const u8{
+        const out_path = fs.path.join(arena, &[_][]const u8{
             entry.basename,
             "out.yaml",
         }) catch @panic("OOM");
-        const err_path = fs.path.join(alloc, &[_][]const u8{
+        const err_path = fs.path.join(arena, &[_][]const u8{
             entry.basename,
             "error",
         }) catch @panic("OOM");
         if (canAccess(entry.dir, out_path)) {
-            const real_out_path = try entry.dir.realpathAlloc(alloc, out_path);
+            const real_out_path = try entry.dir.realpathAlloc(arena, out_path);
             result.value_ptr.result = .{ .expected_output_path = real_out_path };
         } else if (canAccess(entry.dir, err_path)) {
             result.value_ptr.result = .{ .error_expected = {} };
@@ -245,25 +242,30 @@ const expect_err_template =
     \\
 ;
 
-fn emitTest(alloc: mem.Allocator, output: *std.ArrayList(u8), testcase: Testcase) !void {
-    const head = std.fmt.allocPrint(alloc, "test \"{}\" {{\n", .{std.zig.fmtEscapes(testcase.name)}) catch @panic("OOM");
-    defer alloc.free(head);
+fn emitTest(arena: Allocator, output: *std.ArrayList(u8), testcase: Testcase) !void {
+    const head = std.fmt.allocPrint(arena, "test \"{}\" {{\n", .{
+        std.zig.fmtEscapes(testcase.name),
+    }) catch @panic("OOM");
     try output.appendSlice(head);
 
     switch (testcase.result) {
         .none => {
-            const body = std.fmt.allocPrint(alloc, no_output_template, .{testcase.path}) catch @panic("OOM");
-            defer alloc.free(body);
+            const body = std.fmt.allocPrint(arena, no_output_template, .{
+                testcase.path,
+            }) catch @panic("OOM");
             try output.appendSlice(body);
         },
         .expected_output_path => {
-            const body = std.fmt.allocPrint(alloc, expect_file_template, .{ testcase.path, testcase.result.expected_output_path }) catch @panic("OOM");
-            defer alloc.free(body);
+            const body = std.fmt.allocPrint(arena, expect_file_template, .{
+                testcase.path,
+                testcase.result.expected_output_path,
+            }) catch @panic("OOM");
             try output.appendSlice(body);
         },
         .error_expected => {
-            const body = std.fmt.allocPrint(alloc, expect_err_template, .{testcase.path}) catch @panic("OOM");
-            defer alloc.free(body);
+            const body = std.fmt.allocPrint(arena, expect_err_template, .{
+                testcase.path,
+            }) catch @panic("OOM");
             try output.appendSlice(body);
         },
     }
