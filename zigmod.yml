@@ -1,6 +1,0 @@
-id: r42g91zzbj8nebr5bt7zroo1jskkvdl4b983gpyk4m2esxtb
-name: yaml
-main: src/yaml.zig
-license: MIT
-description: YAML parser for Zig
-dependencies:
