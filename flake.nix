@@ -38,7 +38,7 @@
         devShells.default = pkgs.stdenvNoCC.mkDerivation {
           name = "emerald";
           nativeBuildInputs = with pkgs; [
-            zigpkgs."0.13.0"
+            zigpkgs.master
             zlspkgs.default
           ];
         };
