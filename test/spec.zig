@@ -11,6 +11,8 @@ pub const base_id: Step.Id = .custom;
 step: Step,
 output_file: std.Build.GeneratedFile,
 
+const test_filename = "yaml_test_suite.zig";
+
 const preamble =
     \\// This file is generated from the YAML 1.2 test database.
     \\
@@ -86,10 +88,10 @@ fn make(step: *Step, make_options: Step.MakeOptions) !void {
 
     var testcases = std.StringArrayHashMap(Testcase).init(arena);
 
-    const root_data_path = fs.path.join(arena, &[_][]const u8{
+    const root_data_path = try fs.path.join(arena, &[_][]const u8{
         b.build_root.path.?,
         "test/yaml-test-suite",
-    }) catch unreachable;
+    });
 
     const root_data_dir = try std.fs.openDirAbsolute(root_data_path, .{});
 
@@ -107,7 +109,7 @@ fn make(step: *Step, make_options: Step.MakeOptions) !void {
                 if (entry.kind != .sym_link) continue;
                 collectTest(arena, entry, &testcases) catch |err| switch (err) {
                     error.OutOfMemory => @panic("OOM"),
-                    else => @panic("unexpected error occurred while collecting tests"),
+                    else => |e| return e,
                 };
             } else {
                 break :loop;
@@ -133,14 +135,14 @@ fn make(step: *Step, make_options: Step.MakeOptions) !void {
 
     if (try step.cacheHit(&man)) {
         const digest = man.final();
-        spec_test.output_file.path = try b.cache_root.join(arena, &.{
-            "yaml-test-suite", &digest,
+        spec_test.output_file.path = try b.cache_root.join(b.allocator, &.{
+            &digest, test_filename,
         });
         return;
     }
     const digest = man.final();
 
-    const sub_path = b.pathJoin(&.{ "yaml-test-suite", &digest });
+    const sub_path = b.pathJoin(&.{ &digest, test_filename });
     const sub_path_dirname = fs.path.dirname(sub_path).?;
 
     b.cache_root.handle.makePath(sub_path_dirname) catch |err| {
@@ -150,7 +152,7 @@ fn make(step: *Step, make_options: Step.MakeOptions) !void {
     b.cache_root.handle.writeFile(.{ .sub_path = sub_path, .data = output.items }) catch |err| {
         return step.fail("unable to write file: {}", .{err});
     };
-    spec_test.output_file.path = try b.cache_root.join(arena, &.{sub_path});
+    spec_test.output_file.path = try b.cache_root.join(b.allocator, &.{sub_path});
     try man.writeManifest();
 }
 
