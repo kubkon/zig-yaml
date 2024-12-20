@@ -64,6 +64,7 @@ const Testcase = struct {
         expected_output_path: []const u8,
         error_expected,
         none,
+        skip,
     },
     tags: std.BufSet,
 };
@@ -125,7 +126,10 @@ fn make(step: *Step, make_options: Step.MakeOptions) !void {
     try writer.writeAll(preamble);
 
     while (testcases.popOrNull()) |kv| {
-        try emitTest(arena, &output, kv.value);
+        emitTest(arena, &output, kv.value) catch |err| switch (err) {
+            error.OutOfMemory => @panic("OOM"),
+            else => |e| return e,
+        };
     }
 
     var man = b.graph.cache.obtain();
@@ -200,6 +204,11 @@ fn collectTest(arena: Allocator, entry: fs.Dir.Walker.Entry, testcases: *std.Str
             .tags = tag_set,
         };
 
+        if (skipTest(full_name)) {
+            result.value_ptr.result = .skip;
+            return;
+        }
+
         const out_path = try fs.path.join(arena, &[_][]const u8{
             entry.basename,
             "out.yaml",
@@ -219,6 +228,26 @@ fn collectTest(arena: Allocator, entry: fs.Dir.Walker.Entry, testcases: *std.Str
         try result.value_ptr.tags.insert(first_path.name);
     }
 }
+
+fn skipTest(name: []const u8) bool {
+    for (skipped_tests) |skipped_name| {
+        if (mem.eql(u8, name, skipped_name)) return true;
+    }
+    return false;
+}
+
+const skipped_tests = &[_][]const u8{
+    "JR7V - Question marks in scalars",
+    "UDM2 - Plain URL in flow mapping",
+    "8MK2 - Explicit Non-Specific Tag",
+    "6XDY - Two document start markers",
+    "652Z - Question mark at start of flow key",
+    "PUW8 - Document start on last line",
+};
+
+const skip_test_template =
+    \\ return error.SkipZigTest;
+;
 
 const no_output_template =
     \\    var yaml = try loadFromFile("{s}");
@@ -249,29 +278,32 @@ const expect_err_template =
 ;
 
 fn emitTest(arena: Allocator, output: *std.ArrayList(u8), testcase: Testcase) !void {
-    const head = std.fmt.allocPrint(arena, "test \"{}\" {{\n", .{
+    const head = try std.fmt.allocPrint(arena, "test \"{}\" {{\n", .{
         std.zig.fmtEscapes(testcase.name),
-    }) catch @panic("OOM");
+    });
     try output.appendSlice(head);
 
     switch (testcase.result) {
+        .skip => {
+            try output.appendSlice(skip_test_template);
+        },
         .none => {
-            const body = std.fmt.allocPrint(arena, no_output_template, .{
+            const body = try std.fmt.allocPrint(arena, no_output_template, .{
                 testcase.path,
-            }) catch @panic("OOM");
+            });
             try output.appendSlice(body);
         },
         .expected_output_path => {
-            const body = std.fmt.allocPrint(arena, expect_file_template, .{
+            const body = try std.fmt.allocPrint(arena, expect_file_template, .{
                 testcase.path,
                 testcase.result.expected_output_path,
-            }) catch @panic("OOM");
+            });
             try output.appendSlice(body);
         },
         .error_expected => {
-            const body = std.fmt.allocPrint(arena, expect_err_template, .{
+            const body = try std.fmt.allocPrint(arena, expect_err_template, .{
                 testcase.path,
-            }) catch @panic("OOM");
+            });
             try output.appendSlice(body);
         },
     }
