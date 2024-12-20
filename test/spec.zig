@@ -93,7 +93,10 @@ fn make(step: *Step, make_options: Step.MakeOptions) !void {
 
     const root_data_dir = try std.fs.openDirAbsolute(root_data_path, .{});
 
-    var itdir = try root_data_dir.openDir("tags", .{ .iterate = true, .access_sub_paths = true });
+    var itdir = try root_data_dir.openDir("tags", .{
+        .iterate = true,
+        .access_sub_paths = true,
+    });
 
     var walker = try itdir.walk(arena);
     defer walker.deinit();
@@ -149,22 +152,19 @@ fn make(step: *Step, make_options: Step.MakeOptions) !void {
 }
 
 fn collectTest(arena: Allocator, entry: fs.Dir.Walker.Entry, testcases: *std.StringArrayHashMap(Testcase)) !void {
-    var path_components = std.fs.path.componentIterator(entry.path) catch unreachable;
-    const first_path = path_components.first().?;
+    var path_components_it = std.fs.path.componentIterator(entry.path) catch unreachable;
+    const first_path = path_components_it.first().?;
 
-    var remaining_path = arena.alloc(u8, 0) catch @panic("OOM");
-    while (path_components.next()) |component| {
-        const new_path = fs.path.join(arena, &[_][]const u8{
-            remaining_path,
-            component.name,
-        }) catch @panic("OOM");
-        remaining_path = new_path;
+    var path_components = std.ArrayList([]const u8).init(arena);
+    while (path_components_it.next()) |component| {
+        path_components.append(component.name) catch @panic("OOM");
     }
 
+    const remaining_path = fs.path.join(arena, path_components.items) catch @panic("OOM");
     const result = try testcases.getOrPut(remaining_path);
+
     if (!result.found_existing) {
-        const key_alloc: []u8 = try arena.dupe(u8, remaining_path);
-        result.key_ptr.* = key_alloc;
+        result.key_ptr.* = remaining_path;
 
         const in_path = fs.path.join(arena, &[_][]const u8{
             entry.basename,
