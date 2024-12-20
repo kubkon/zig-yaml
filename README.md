@@ -88,3 +88,21 @@ nested:
     wick: john doe
 finally: [ 8.17, 19.78, 17, 21  ]
 ```
+
+## Running YAML spec test suite
+
+Remember to clone the repo with submodules first
+
+```sh
+git clone --recurse-submodules
+```
+
+Then, you can run the test suite as follows
+
+```sh
+zig build test -Denable-spec-tests
+```
+
+See also [issue #48](https://github.com/kubkon/zig-yaml/issues/48) for a meta issue tracking failing spec tests.
+
+Any test that you think of working on and would like to include in the spec tests (that was previously skipped), can be removed from the skipped tests lists in https://github.com/kubkon/zig-yaml/blob/b3cc3a3319ab40fa466a4d5e9c8483267e6ffbee/test/spec.zig#L239-L562
