@@ -66,7 +66,7 @@ fn make(step: *Step, make_options: Step.MakeOptions) !void {
     cwd.access("test/yaml-test-suite/tags", .{}) catch {
         return spec_test.step.fail("Testfiles not found, make sure you have loaded the submodule.", .{});
     };
-    if (b.host.result.os.tag == .windows) {
+    if (b.graph.host.result.os.tag == .windows) {
         return spec_test.step.fail("Windows does not support symlinks in git properly, can't run testsuite.", .{});
     }
 
