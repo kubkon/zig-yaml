@@ -102,10 +102,13 @@ fn make(step: *Step, make_options: Step.MakeOptions) !void {
     defer walker.deinit();
 
     loop: {
-        while (walker.next()) |entry| {
-            if (entry) |e| {
-                if (e.kind != .sym_link) continue;
-                collectTest(arena, e, &testcases) catch {};
+        while (walker.next()) |maybe_entry| {
+            if (maybe_entry) |entry| {
+                if (entry.kind != .sym_link) continue;
+                collectTest(arena, entry, &testcases) catch |err| switch (err) {
+                    error.OutOfMemory => @panic("OOM"),
+                    else => @panic("unexpected error occurred while collecting tests"),
+                };
             } else {
                 break :loop;
             }
@@ -152,41 +155,41 @@ fn make(step: *Step, make_options: Step.MakeOptions) !void {
 }
 
 fn collectTest(arena: Allocator, entry: fs.Dir.Walker.Entry, testcases: *std.StringArrayHashMap(Testcase)) !void {
-    var path_components_it = std.fs.path.componentIterator(entry.path) catch unreachable;
+    var path_components_it = try std.fs.path.componentIterator(entry.path);
     const first_path = path_components_it.first().?;
 
     var path_components = std.ArrayList([]const u8).init(arena);
     while (path_components_it.next()) |component| {
-        path_components.append(component.name) catch @panic("OOM");
+        try path_components.append(component.name);
     }
 
-    const remaining_path = fs.path.join(arena, path_components.items) catch @panic("OOM");
+    const remaining_path = try fs.path.join(arena, path_components.items);
     const result = try testcases.getOrPut(remaining_path);
 
     if (!result.found_existing) {
         result.key_ptr.* = remaining_path;
 
-        const in_path = fs.path.join(arena, &[_][]const u8{
+        const in_path = try fs.path.join(arena, &[_][]const u8{
             entry.basename,
             "in.yaml",
-        }) catch @panic("OOM");
+        });
         const real_in_path = try entry.dir.realpathAlloc(arena, in_path);
 
-        const name_file_path = fs.path.join(arena, &[_][]const u8{
+        const name_file_path = try fs.path.join(arena, &[_][]const u8{
             entry.basename,
             "===",
-        }) catch @panic("OOM");
-        const name_file = entry.dir.openFile(name_file_path, .{}) catch unreachable;
+        });
+        const name_file = try entry.dir.openFile(name_file_path, .{});
         defer name_file.close();
         const name = try name_file.readToEndAlloc(arena, std.math.maxInt(u32));
 
         var tag_set = std.BufSet.init(arena);
-        tag_set.insert(first_path.name) catch @panic("OOM");
+        try tag_set.insert(first_path.name);
 
-        const full_name = std.fmt.allocPrint(arena, "{s} - {s}", .{
+        const full_name = try std.fmt.allocPrint(arena, "{s} - {s}", .{
             remaining_path,
             name[0 .. name.len - 1],
-        }) catch @panic("OOM");
+        });
 
         result.value_ptr.* = .{
             .name = full_name,
@@ -195,14 +198,15 @@ fn collectTest(arena: Allocator, entry: fs.Dir.Walker.Entry, testcases: *std.Str
             .tags = tag_set,
         };
 
-        const out_path = fs.path.join(arena, &[_][]const u8{
+        const out_path = try fs.path.join(arena, &[_][]const u8{
             entry.basename,
             "out.yaml",
-        }) catch @panic("OOM");
-        const err_path = fs.path.join(arena, &[_][]const u8{
+        });
+        const err_path = try fs.path.join(arena, &[_][]const u8{
             entry.basename,
             "error",
-        }) catch @panic("OOM");
+        });
+
         if (canAccess(entry.dir, out_path)) {
             const real_out_path = try entry.dir.realpathAlloc(arena, out_path);
             result.value_ptr.result = .{ .expected_output_path = real_out_path };
@@ -210,7 +214,7 @@ fn collectTest(arena: Allocator, entry: fs.Dir.Walker.Entry, testcases: *std.Str
             result.value_ptr.result = .{ .error_expected = {} };
         }
     } else {
-        result.value_ptr.tags.insert(first_path.name) catch @panic("OOM");
+        try result.value_ptr.tags.insert(first_path.name);
     }
 }
 
