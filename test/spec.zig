@@ -54,7 +54,16 @@ pub fn path(spec_test: *SpecTest) std.Build.LazyPath {
     return std.Build.LazyPath{ .generated = .{ .file = &spec_test.output_file } };
 }
 
-const Testcase = struct { name: []const u8, path: []const u8, result: union(enum) { expected_output_path: []const u8, error_expected, none }, tags: std.BufSet };
+const Testcase = struct {
+    name: []const u8,
+    path: []const u8,
+    result: union(enum) {
+        expected_output_path: []const u8,
+        error_expected,
+        none,
+    },
+    tags: std.BufSet,
+};
 
 fn make(step: *Step, make_options: Step.MakeOptions) !void {
     _ = make_options;
@@ -87,7 +96,8 @@ fn make(step: *Step, make_options: Step.MakeOptions) !void {
     loop: {
         while (walker.next()) |entry| {
             if (entry) |e| {
-                if (collectTest(b.allocator, e, &testcases)) |_| {} else |_| {}
+                if (e.kind != .sym_link) continue;
+                collectTest(b.allocator, e, &testcases) catch {};
             } else {
                 break :loop;
             }
@@ -143,9 +153,6 @@ fn make(step: *Step, make_options: Step.MakeOptions) !void {
 }
 
 fn collectTest(alloc: mem.Allocator, entry: fs.Dir.Walker.Entry, testcases: *std.StringArrayHashMap(Testcase)) !void {
-    if (entry.kind != .sym_link) {
-        return;
-    }
     var path_components = std.fs.path.componentIterator(entry.path) catch unreachable;
     const first_path = path_components.first().?;
 
