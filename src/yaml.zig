@@ -403,7 +403,6 @@ pub const Yaml = struct {
             .@"struct" => self.parseStruct(T, try value.asMap()),
             .@"union" => self.parseUnion(T, value),
             .array => self.parseArray(T, try value.asList()),
-            .bool => value.asBool(),
             .pointer => if (value.asList()) |list| {
                 return self.parsePointer(T, .{ .list = list });
             } else |_| {
@@ -417,8 +416,7 @@ pub const Yaml = struct {
 
     fn parseBoolean(self: *Yaml, comptime T: type, value: Value) Error!T {
         _ = self;
-        const value_info = try value.asBool();
-        return value_info;
+        return value.asBool();
     }
 
     fn parseUnion(self: *Yaml, comptime T: type, value: Value) Error!T {
