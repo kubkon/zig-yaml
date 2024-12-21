@@ -520,12 +520,27 @@ const Parser = struct {
             node.values.deinit(self.allocator);
         }
 
+        const first_col = self.getCol(node.base.start);
+
         log.debug("(list) begin {s}@{d}", .{ @tagName(self.tree.tokens[node.base.start].id), node.base.start });
 
         while (true) {
             self.eatCommentsAndSpace(&.{});
 
-            _ = self.eatToken(.seq_item_ind, &.{}) orelse break;
+            const pos = self.eatToken(.seq_item_ind, &.{}) orelse {
+                log.debug("(list {d}) break", .{first_col});
+                break;
+            };
+            const cur_col = self.getCol(pos);
+            if (cur_col < first_col) {
+                log.debug("(list {d}) << break", .{first_col});
+                // this hyphen belongs to an outer list
+                self.token_it.seekBy(-1);
+                // this will end this list
+                break;
+            }
+            //  an inner list will be parsed by self.value() so
+            //  checking for  cur_col > first_col is not necessary here
 
             const val = (try self.value()) orelse return error.MalformedYaml;
             try node.values.append(self.allocator, val);
