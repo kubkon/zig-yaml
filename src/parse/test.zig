@@ -324,6 +324,114 @@ test "map of list of maps" {
     }
 }
 
+test "map of list of maps with inner list" {
+    const source =
+        \\ outer:
+        \\   - a: foo
+        \\     fooers:
+        \\       - name: inner-foo
+        \\   - b: bar
+        \\     fooers:
+        \\       - name: inner-bar
+    ;
+
+    var tree = Tree.init(testing.allocator);
+    defer tree.deinit();
+    try tree.parse(source);
+
+    try testing.expectEqual(tree.docs.items.len, 1);
+
+    const doc = tree.docs.items[0].cast(Node.Doc).?;
+    try testing.expectEqual(doc.base.start, 1);
+    try testing.expectEqual(doc.base.end, tree.tokens.len - 2);
+
+    try testing.expect(doc.value != null);
+    try testing.expectEqual(doc.value.?.tag, .map);
+
+    const map = doc.value.?.cast(Node.Map).?;
+    try testing.expectEqual(map.base.start, 1);
+    try testing.expectEqual(map.base.end, tree.tokens.len - 2);
+    try testing.expectEqual(map.values.items.len, 1);
+
+    const entry = map.values.items[0];
+    const key = tree.tokens[entry.key];
+    try testing.expectEqual(key.id, .literal);
+    try testing.expectEqualStrings("outer", tree.source[key.start..key.end]);
+
+    const value = entry.value.?.cast(Node.List).?;
+    try testing.expectEqual(value.base.start, 5);
+    try testing.expectEqual(value.base.end, tree.tokens.len - 2);
+    try testing.expectEqual(value.values.items.len, 2);
+
+    {
+        const elem = value.values.items[0].cast(Node.Map).?;
+        const nested = elem.values.items[0];
+        const nested_key = tree.tokens[nested.key];
+        try testing.expectEqual(nested_key.id, .literal);
+        try testing.expectEqualStrings("a", tree.source[nested_key.start..nested_key.end]);
+
+        const nested_v = nested.value.?.cast(Node.Value).?;
+        const leaf = tree.tokens[nested_v.base.start];
+        try testing.expectEqual(leaf.id, .literal);
+        try testing.expectEqualStrings("foo", tree.source[leaf.start..leaf.end]);
+
+        {
+            const elem_with_inner_list = elem.values.items[1];
+            const elem_with_inner_list_key = tree.tokens[elem_with_inner_list.key];
+            try testing.expectEqual(elem_with_inner_list_key.id, .literal);
+            try testing.expectEqualStrings("fooers", tree.source[elem_with_inner_list_key.start..elem_with_inner_list_key.end]);
+
+            const elem_with_inner_list_value = elem_with_inner_list.value.?.cast(Node.List).?;
+            try testing.expectEqual(elem_with_inner_list_value.values.items.len, 1);
+
+            const innermost_entries = elem_with_inner_list_value.values.items[0].cast(Node.Map).?;
+            const innermost_elem = innermost_entries.values.items[0];
+            const innermost_key = tree.tokens[innermost_elem.key];
+            try testing.expectEqual(innermost_key.id, .literal);
+            try testing.expectEqualStrings("name", tree.source[innermost_key.start..innermost_key.end]);
+
+            const innermost_value = innermost_elem.value.?.cast(Node.Value).?;
+            const innermost_leaf = tree.tokens[innermost_value.base.start];
+            try testing.expectEqual(innermost_leaf.id, .literal);
+            try testing.expectEqualStrings("inner-foo", tree.source[innermost_leaf.start..innermost_leaf.end]);
+        }
+    }
+
+    {
+        const elem = value.values.items[1].cast(Node.Map).?;
+        const nested = elem.values.items[0];
+        const nested_key = tree.tokens[nested.key];
+        try testing.expectEqual(nested_key.id, .literal);
+        try testing.expectEqualStrings("b", tree.source[nested_key.start..nested_key.end]);
+
+        const nested_v = nested.value.?.cast(Node.Value).?;
+        const leaf = tree.tokens[nested_v.base.start];
+        try testing.expectEqual(leaf.id, .literal);
+        try testing.expectEqualStrings("bar", tree.source[leaf.start..leaf.end]);
+
+        {
+            const elem_with_inner_list = elem.values.items[1];
+            const elem_with_inner_list_key = tree.tokens[elem_with_inner_list.key];
+            try testing.expectEqual(elem_with_inner_list_key.id, .literal);
+            try testing.expectEqualStrings("fooers", tree.source[elem_with_inner_list_key.start..elem_with_inner_list_key.end]);
+
+            const elem_with_inner_list_value = elem_with_inner_list.value.?.cast(Node.List).?;
+            try testing.expectEqual(elem_with_inner_list_value.values.items.len, 1);
+
+            const innermost_entries = elem_with_inner_list_value.values.items[0].cast(Node.Map).?;
+            const innermost_elem = innermost_entries.values.items[0];
+            const innermost_key = tree.tokens[innermost_elem.key];
+            try testing.expectEqual(innermost_key.id, .literal);
+            try testing.expectEqualStrings("name", tree.source[innermost_key.start..innermost_key.end]);
+
+            const innermost_value = innermost_elem.value.?.cast(Node.Value).?;
+            const innermost_leaf = tree.tokens[innermost_value.base.start];
+            try testing.expectEqual(innermost_leaf.id, .literal);
+            try testing.expectEqualStrings("inner-bar", tree.source[innermost_leaf.start..innermost_leaf.end]);
+        }
+    }
+}
+
 test "list of lists" {
     const source =
         \\- [name        , hr, avg  ]
@@ -701,10 +809,10 @@ test "simple list" {
 }
 
 test "list indentation matters" {
-    try parseSuccess(
+    try parseError(
         \\  - a
         \\- b
-    );
+    , error.UnexpectedToken);
 
     try parseSuccess(
         \\- a
