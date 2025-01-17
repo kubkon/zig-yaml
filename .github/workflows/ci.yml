@@ -19,7 +19,7 @@ jobs:
         submodules: true
     - uses: mlugg/setup-zig@v1
       with:
-        version: master
+        version: 0.13.0
     - run: zig fmt --check src 
     - run: zig build test
     - run: zig build run
@@ -38,5 +38,5 @@ jobs:
           submodules: true
       - uses: mlugg/setup-zig@v1
         with:
-          version: master
+          version: 0.13.0
       - run: zig build test -Denable-spec-tests
