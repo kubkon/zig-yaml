@@ -69,8 +69,8 @@ const Testcase = struct {
     tags: std.BufSet,
 };
 
-fn make(step: *Step, make_options: Step.MakeOptions) !void {
-    _ = make_options;
+fn make(step: *Step, prog_node: std.Progress.Node) !void {
+    _ = prog_node;
 
     const spec_test: *SpecTest = @fieldParentPtr("step", step);
     const b = step.owner;
