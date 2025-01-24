@@ -11,6 +11,32 @@ This is very much a work-in-progress, so expect things to break on a regular bas
 community involved in helping out with this btw! Feel free to fork and submit patches, enhancements, and of course
 issues.
 
+
+## Basic installation
+
+The library can be installed using the Zig tools. First, you need to fetch the required release of the library into your project. 
+```
+zig fetch --save https://github.com/kubkon/zig-yaml/archive/refs/tags/[RELEASE_VERSION].tar.gz
+```
+
+It's more convenient to save the library with a desired name, for example, like this:
+```
+zig fetch --save=yaml https://github.com/kubkon/zig-yaml/archive/refs/tags/0.0.1.tar.gz
+```
+
+And then add those lines to your project's `build.zig` file:
+```
+// add that code after "b.installArtifact(exe)" line
+const yaml = b.dependency("yaml", .{
+  .target = target,
+  .optimize = optimize,
+});
+exe.root_module.addImport("yaml", yaml.module("yaml"));
+```
+
+After that, you can simply import the zig-yaml library in your project's code by using `const yaml = @import("yaml");`.
+
+
 ## Basic usage
 
 The parser currently understands a few YAML primitives such as:
@@ -58,6 +84,9 @@ try std.testing.expectEqual(map.get("names").?.list.len, 3);
 2. For typed representation of YAML, use `Yaml.parse`:
 
 ```zig
+var typed = try yaml.Yaml.load(std.testing.allocator, source);
+defer typed.deinit();
+
 const Simple = struct {
     names: []const []const u8,
     numbers: []const i16,
@@ -68,7 +97,7 @@ const Simple = struct {
     finally: [4]f16,
 };
 
-const simple = try untyped.parse(Simple);
+const simple = try typed.parse(Simple);
 try std.testing.expectEqual(simple.names.len, 3);
 ```
 
