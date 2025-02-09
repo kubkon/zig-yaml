@@ -9,6 +9,31 @@ const Token = Tokenizer.Token;
 const TokenIndex = Tokenizer.TokenIndex;
 const TokenIterator = Tokenizer.TokenIterator;
 
+pub const Node2 = struct {
+    tag: Tag,
+    data: Data,
+
+    pub const Tag = enum(u8) {
+        doc,
+        map,
+        list,
+        value,
+    };
+    pub const Data = union {};
+
+    pub const Index = enum(u32) {
+        _,
+    };
+
+    // Make sure we don't accidentally make nodes bigger than expected.
+    // Note that in safety builds, Zig is allowed to insert a secret field for safety checks.
+    comptime {
+        if (!std.debug.runtime_safety) {
+            assert(@sizeOf(Data) == 8);
+        }
+    }
+};
+
 pub const ParseError = error{
     InvalidEscapeSequence,
     MalformedYaml,
