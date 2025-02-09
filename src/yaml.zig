@@ -70,7 +70,7 @@ pub const Value = union(enum) {
         should_inline_first_key: bool = false,
     };
 
-    pub fn stringify(self: Value, writer: anytype, args: StringifyArgs) anyerror!void {
+    pub fn stringify(self: Value, writer: anytype, args: StringifyArgs) error{OutOfMemory}!void {
         switch (self) {
             .empty => return,
             .int => |int| return writer.print("{}", .{int}),
