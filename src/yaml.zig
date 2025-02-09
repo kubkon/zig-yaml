@@ -25,7 +25,7 @@ pub const YamlError = error{
 
 pub const StringifyError = error{
     OutOfMemory,
-} || std.fs.File.WriteError;
+} || YamlError || std.fs.File.WriteError;
 
 pub const List = []Value;
 pub const Map = std.StringArrayHashMap(Value);
