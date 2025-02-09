@@ -23,6 +23,10 @@ pub const YamlError = error{
     CannotEncodeValue,
 } || ParseError || std.fmt.ParseIntError;
 
+pub const StringifyError = error{
+    OutOfMemory,
+} || std.fs.File.WriteError;
+
 pub const List = []Value;
 pub const Map = std.StringArrayHashMap(Value);
 
@@ -70,7 +74,7 @@ pub const Value = union(enum) {
         should_inline_first_key: bool = false,
     };
 
-    pub fn stringify(self: Value, writer: anytype, args: StringifyArgs) error{OutOfMemory}!void {
+    pub fn stringify(self: Value, writer: anytype, args: StringifyArgs) StringifyError!void {
         switch (self) {
             .empty => return,
             .int => |int| return writer.print("{}", .{int}),
@@ -514,7 +518,7 @@ pub const Yaml = struct {
     }
 };
 
-pub fn stringify(allocator: Allocator, input: anytype, writer: anytype) !void {
+pub fn stringify(allocator: Allocator, input: anytype, writer: anytype) StringifyError!void {
     var arena = ArenaAllocator.init(allocator);
     defer arena.deinit();
 
