@@ -6,7 +6,6 @@ const mem = std.mem;
 const Allocator = mem.Allocator;
 const Tokenizer = @import("Tokenizer.zig");
 const Token = Tokenizer.Token;
-const TokenIndex = Tokenizer.TokenIndex;
 const TokenIterator = Tokenizer.TokenIterator;
 
 pub const ParseError = error{
@@ -21,8 +20,8 @@ pub const ParseError = error{
 pub const Node = struct {
     tag: Tag,
     tree: *const Tree,
-    start: TokenIndex,
-    end: TokenIndex,
+    start: Token.Index,
+    end: Token.Index,
 
     pub const Tag = enum {
         doc,
@@ -84,7 +83,7 @@ pub const Node = struct {
             .start = undefined,
             .end = undefined,
         },
-        directive: ?TokenIndex = null,
+        directive: ?Token.Index = null,
         value: ?*Node = null,
 
         pub const base_tag: Node.Tag = .doc;
@@ -129,7 +128,7 @@ pub const Node = struct {
         pub const base_tag: Node.Tag = .map;
 
         pub const Entry = struct {
-            key: TokenIndex,
+            key: Token.Index,
             value: ?*Node,
         };
 
@@ -235,7 +234,7 @@ pub const Tree = struct {
     allocator: Allocator,
     source: []const u8,
     tokens: []Token,
-    line_cols: std.AutoHashMap(TokenIndex, LineCol),
+    line_cols: std.AutoHashMap(Token.Index, LineCol),
     docs: std.ArrayListUnmanaged(*Node) = .{},
 
     pub fn init(allocator: Allocator) Tree {
@@ -243,7 +242,7 @@ pub const Tree = struct {
             .allocator = allocator,
             .source = undefined,
             .tokens = undefined,
-            .line_cols = std.AutoHashMap(TokenIndex, LineCol).init(allocator),
+            .line_cols = std.AutoHashMap(Token.Index, LineCol).init(allocator),
         };
     }
 
@@ -263,12 +262,14 @@ pub const Tree = struct {
         return self.getRaw(id, id);
     }
 
-    pub fn getRaw(self: Tree, start: TokenIndex, end: TokenIndex) []const u8 {
-        assert(start <= end);
-        assert(start < self.tokens.len and end < self.tokens.len);
-        const start_token = self.tokens[start];
-        const end_token = self.tokens[end];
+    pub fn getRaw(self: Tree, start: Token.Index, end: Token.Index) []const u8 {
+        const start_token = self.getToken(start);
+        const end_token = self.getToken(end);
         return self.source[start_token.loc.start..end_token.loc.end];
+    }
+
+    pub fn getToken(self: Tree, index: Token.Index) Token {
+        return self.tokens[@intFromEnum(index)];
     }
 
     pub fn parse(self: *Tree, source: []const u8) !void {
@@ -281,7 +282,7 @@ pub const Tree = struct {
 
         while (true) {
             const token = tokenizer.next();
-            const tok_id = tokens.items.len;
+            const tok_id: Token.Index = @enumFromInt(tokens.items.len);
             try tokens.append(token);
 
             try self.line_cols.putNoClobber(tok_id, .{
@@ -316,7 +317,7 @@ pub const Tree = struct {
             parser.eatCommentsAndSpace(&.{});
             const token = parser.token_it.next() orelse break;
 
-            log.debug("(main) next {s}@{d}", .{ @tagName(token.id), parser.token_it.pos - 1 });
+            log.debug("(main) next {s}@{d}", .{ @tagName(token.id), @intFromEnum(parser.token_it.pos) - 1 });
 
             switch (token.id) {
                 .eof => break,
@@ -334,7 +335,7 @@ const Parser = struct {
     allocator: Allocator,
     tree: *Tree,
     token_it: *TokenIterator,
-    line_cols: *const std.AutoHashMap(TokenIndex, LineCol),
+    line_cols: *const std.AutoHashMap(Token.Index, LineCol),
 
     fn value(self: *Parser) ParseError!?*Node {
         self.eatCommentsAndSpace(&.{});
@@ -380,7 +381,7 @@ const Parser = struct {
         node.base.tree = self.tree;
         node.base.start = self.token_it.pos;
 
-        log.debug("(doc) begin {s}@{d}", .{ @tagName(self.tree.tokens[node.base.start].id), node.base.start });
+        log.debug("(doc) begin {s}@{d}", .{ @tagName(self.tree.getToken(node.base.start).id), node.base.start });
 
         // Parse header
         const explicit_doc: bool = if (self.eatToken(.doc_start, &.{})) |doc_pos| explicit_doc: {
@@ -412,17 +413,17 @@ const Parser = struct {
                 if (!explicit_doc) return error.UnexpectedToken;
                 if (self.getCol(pos) > 0) return error.MalformedYaml;
                 self.token_it.seekBy(-1);
-                node.base.end = pos - 1;
+                node.base.end = @enumFromInt(@intFromEnum(pos) - 1);
                 break :footer;
             }
             if (self.eatToken(.eof, &.{})) |pos| {
-                node.base.end = pos - 1;
+                node.base.end = @enumFromInt(@intFromEnum(pos) - 1);
                 break :footer;
             }
             return error.UnexpectedToken;
         }
 
-        log.debug("(doc) end {s}@{d}", .{ @tagName(self.tree.tokens[node.base.end].id), node.base.end });
+        log.debug("(doc) end {s}@{d}", .{ @tagName(self.tree.getToken(node.base.end).id), node.base.end });
 
         return &node.base;
     }
@@ -442,7 +443,7 @@ const Parser = struct {
             node.values.deinit(self.allocator);
         }
 
-        log.debug("(map) begin {s}@{d}", .{ @tagName(self.tree.tokens[node.base.start].id), node.base.start });
+        log.debug("(map) begin {s}@{d}", .{ @tagName(self.tree.getToken(node.base.start).id), node.base.start });
 
         const col = self.getCol(node.base.start);
 
@@ -500,9 +501,9 @@ const Parser = struct {
             });
         }
 
-        node.base.end = self.token_it.pos - 1;
+        node.base.end = @enumFromInt(@intFromEnum(self.token_it.pos) - 1);
 
-        log.debug("(map) end {s}@{d}", .{ @tagName(self.tree.tokens[node.base.end].id), node.base.end });
+        log.debug("(map) end {s}@{d}", .{ @tagName(self.tree.getToken(node.base.end).id), node.base.end });
 
         return &node.base;
     }
@@ -522,7 +523,7 @@ const Parser = struct {
 
         const first_col = self.getCol(node.base.start);
 
-        log.debug("(list) begin {s}@{d}", .{ @tagName(self.tree.tokens[node.base.start].id), node.base.start });
+        log.debug("(list) begin {s}@{d}", .{ @tagName(self.tree.getToken(node.base.start).id), node.base.start });
 
         while (true) {
             self.eatCommentsAndSpace(&.{});
@@ -546,9 +547,9 @@ const Parser = struct {
             try node.values.append(self.allocator, val);
         }
 
-        node.base.end = self.token_it.pos - 1;
+        node.base.end = @enumFromInt(@intFromEnum(self.token_it.pos) - 1);
 
-        log.debug("(list) end {s}@{d}", .{ @tagName(self.tree.tokens[node.base.end].id), node.base.end });
+        log.debug("(list) end {s}@{d}", .{ @tagName(self.tree.getToken(node.base.end).id), node.base.end });
 
         return &node.base;
     }
@@ -566,7 +567,7 @@ const Parser = struct {
             node.values.deinit(self.allocator);
         }
 
-        log.debug("(list) begin {s}@{d}", .{ @tagName(self.tree.tokens[node.base.start].id), node.base.start });
+        log.debug("(list) begin {s}@{d}", .{ @tagName(self.tree.getToken(node.base.start).id), node.base.start });
 
         _ = try self.expectToken(.flow_seq_start, &.{});
 
@@ -583,7 +584,7 @@ const Parser = struct {
             try node.values.append(self.allocator, val);
         }
 
-        log.debug("(list) end {s}@{d}", .{ @tagName(self.tree.tokens[node.base.end].id), node.base.end });
+        log.debug("(list) end {s}@{d}", .{ @tagName(self.tree.getToken(node.base.end).id), node.base.end });
 
         return &node.base;
     }
@@ -600,24 +601,24 @@ const Parser = struct {
         while (self.token_it.next()) |tok| {
             switch (tok.id) {
                 .single_quoted => {
-                    node.base.end = self.token_it.pos - 1;
+                    node.base.end = @enumFromInt(@intFromEnum(self.token_it.pos) - 1);
                     const raw = self.tree.getRaw(node.base.start, node.base.end);
                     try self.parseSingleQuoted(node, raw);
                     break;
                 },
                 .double_quoted => {
-                    node.base.end = self.token_it.pos - 1;
+                    node.base.end = @enumFromInt(@intFromEnum(self.token_it.pos) - 1);
                     const raw = self.tree.getRaw(node.base.start, node.base.end);
                     try self.parseDoubleQuoted(node, raw);
                     break;
                 },
                 .literal => {},
                 .space => {
-                    const trailing = self.token_it.pos - 2;
+                    const trailing = @intFromEnum(self.token_it.pos) - 2;
                     self.eatCommentsAndSpace(&.{});
                     if (self.token_it.peek()) |peek| {
                         if (peek.id != .literal) {
-                            node.base.end = trailing;
+                            node.base.end = @enumFromInt(trailing);
                             const raw = self.tree.getRaw(node.base.start, node.base.end);
                             try node.string_value.appendSlice(self.allocator, raw);
                             break;
@@ -626,7 +627,7 @@ const Parser = struct {
                 },
                 else => {
                     self.token_it.seekBy(-1);
-                    node.base.end = self.token_it.pos - 1;
+                    node.base.end = @enumFromInt(@intFromEnum(self.token_it.pos) - 1);
                     const raw = self.tree.getRaw(node.base.start, node.base.end);
                     try node.string_value.appendSlice(self.allocator, raw);
                     break;
@@ -660,7 +661,7 @@ const Parser = struct {
         }
     }
 
-    fn eatToken(self: *Parser, id: Token.Id, comptime exclusions: []const Token.Id) ?TokenIndex {
+    fn eatToken(self: *Parser, id: Token.Id, comptime exclusions: []const Token.Id) ?Token.Index {
         log.debug("eatToken('{s}')", .{@tagName(id)});
         self.eatCommentsAndSpace(exclusions);
         const pos = self.token_it.pos;
@@ -675,16 +676,16 @@ const Parser = struct {
         }
     }
 
-    fn expectToken(self: *Parser, id: Token.Id, comptime exclusions: []const Token.Id) ParseError!TokenIndex {
+    fn expectToken(self: *Parser, id: Token.Id, comptime exclusions: []const Token.Id) ParseError!Token.Index {
         log.debug("expectToken('{s}')", .{@tagName(id)});
         return self.eatToken(id, exclusions) orelse error.UnexpectedToken;
     }
 
-    fn getLine(self: *Parser, index: TokenIndex) usize {
+    fn getLine(self: *Parser, index: Token.Index) usize {
         return self.line_cols.get(index).?.line;
     }
 
-    fn getCol(self: *Parser, index: TokenIndex) usize {
+    fn getCol(self: *Parser, index: Token.Index) usize {
         return self.line_cols.get(index).?.col;
     }
 
