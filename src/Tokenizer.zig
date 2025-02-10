@@ -10,8 +10,12 @@ in_flow: usize = 0,
 
 pub const Token = struct {
     id: Id,
-    start: usize,
-    end: usize,
+    loc: Loc,
+
+    pub const Loc = struct {
+        start: usize,
+        end: usize,
+    };
 
     pub const Id = enum {
         // zig fmt: off
@@ -40,40 +44,44 @@ pub const Token = struct {
         literal,
         // zig fmt: on
     };
-};
 
-pub const TokenIndex = usize;
+    pub const Index = enum(u32) {
+        _,
+    };
+};
 
 pub const TokenIterator = struct {
     buffer: []const Token,
-    pos: TokenIndex = 0,
+    pos: Token.Index = @enumFromInt(0),
 
     pub fn next(self: *TokenIterator) ?Token {
         const token = self.peek() orelse return null;
-        self.pos += 1;
+        self.pos = @enumFromInt(@intFromEnum(self.pos) + 1);
         return token;
     }
 
     pub fn peek(self: TokenIterator) ?Token {
-        if (self.pos >= self.buffer.len) return null;
-        return self.buffer[self.pos];
+        const pos = @intFromEnum(self.pos);
+        if (pos >= self.buffer.len) return null;
+        return self.buffer[pos];
     }
 
     pub fn reset(self: *TokenIterator) void {
-        self.pos = 0;
+        self.pos = @enumFromInt(0);
     }
 
-    pub fn seekTo(self: *TokenIterator, pos: TokenIndex) void {
+    pub fn seekTo(self: *TokenIterator, pos: Token.Index) void {
         self.pos = pos;
     }
 
     pub fn seekBy(self: *TokenIterator, offset: isize) void {
-        const new_pos = @as(isize, @bitCast(self.pos)) + offset;
-        if (new_pos < 0) {
-            self.pos = 0;
+        var pos = @intFromEnum(self.pos);
+        if (offset < 0) {
+            pos -|= @intCast(@abs(offset));
         } else {
-            self.pos = @as(usize, @intCast(new_pos));
+            pos +|= @intCast(@as(usize, @bitCast(offset)));
         }
+        self.pos = @enumFromInt(pos);
     }
 };
 
@@ -94,8 +102,10 @@ fn matchesPattern(self: Tokenizer, comptime pattern: []const u8) bool {
 pub fn next(self: *Tokenizer) Token {
     var result = Token{
         .id = .eof,
-        .start = self.index,
-        .end = undefined,
+        .loc = .{
+            .start = self.index,
+            .end = undefined,
+        },
     };
 
     var state: enum {
@@ -306,10 +316,10 @@ pub fn next(self: *Tokenizer) Token {
         }
     }
 
-    result.end = self.index;
+    result.loc.end = self.index;
 
     log.debug("{any}", .{result});
-    log.debug("    | {s}", .{self.buffer[result.start..result.end]});
+    log.debug("    | {s}", .{self.buffer[result.loc.start..result.loc.end]});
 
     return result;
 }
