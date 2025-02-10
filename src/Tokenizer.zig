@@ -10,8 +10,12 @@ in_flow: usize = 0,
 
 pub const Token = struct {
     id: Id,
-    start: usize,
-    end: usize,
+    loc: Loc,
+
+    pub const Loc = struct {
+        start: usize,
+        end: usize,
+    };
 
     pub const Id = enum {
         // zig fmt: off
@@ -94,8 +98,10 @@ fn matchesPattern(self: Tokenizer, comptime pattern: []const u8) bool {
 pub fn next(self: *Tokenizer) Token {
     var result = Token{
         .id = .eof,
-        .start = self.index,
-        .end = undefined,
+        .loc = .{
+            .start = self.index,
+            .end = undefined,
+        },
     };
 
     var state: enum {
@@ -306,10 +312,10 @@ pub fn next(self: *Tokenizer) Token {
         }
     }
 
-    result.end = self.index;
+    result.loc.end = self.index;
 
     log.debug("{any}", .{result});
-    log.debug("    | {s}", .{self.buffer[result.start..result.end]});
+    log.debug("    | {s}", .{self.buffer[result.loc.start..result.loc.end]});
 
     return result;
 }

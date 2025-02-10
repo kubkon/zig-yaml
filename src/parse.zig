@@ -268,7 +268,7 @@ pub const Tree = struct {
         assert(start < self.tokens.len and end < self.tokens.len);
         const start_token = self.tokens[start];
         const end_token = self.tokens[end];
-        return self.source[start_token.start..end_token.end];
+        return self.source[start_token.loc.start..end_token.loc.end];
     }
 
     pub fn parse(self: *Tree, source: []const u8) !void {
@@ -286,14 +286,14 @@ pub const Tree = struct {
 
             try self.line_cols.putNoClobber(tok_id, .{
                 .line = line,
-                .col = token.start - prev_line_last_col,
+                .col = token.loc.start - prev_line_last_col,
             });
 
             switch (token.id) {
                 .eof => break,
                 .new_line => {
                     line += 1;
-                    prev_line_last_col = token.end;
+                    prev_line_last_col = token.loc.end;
                 },
                 else => {},
             }
