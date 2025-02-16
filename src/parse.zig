@@ -93,6 +93,10 @@ pub const Map = struct {
 /// Trailing is a list of Node indexes.
 pub const List = struct {
     list_len: u32,
+
+    pub const Entry = struct {
+        value: Node.Index,
+    };
 };
 
 /// Index into string_bytes.
@@ -344,6 +348,14 @@ pub const Tree = struct {
         self.* = undefined;
     }
 
+    pub fn nodeTag(tree: Tree, node: Node.Index) Node.Tag {
+        return tree.nodes.items(.tag)[@intFromEnum(node)];
+    }
+
+    pub fn nodeData(tree: Tree, node: Node.Index) Node.Data {
+        return tree.nodes.items(.data)[@intFromEnum(node)];
+    }
+
     /// Returns the requested data, as well as the new index which is at the start of the
     /// trailers for the object.
     pub fn extraData(tree: Tree, comptime T: type, index: Extra) struct { data: T, end: Extra } {
@@ -354,7 +366,7 @@ pub const Tree = struct {
             @field(result, field.name) = switch (field.type) {
                 u32 => tree.extra[i],
                 i32 => @bitCast(tree.extra[i]),
-                Node.Index => @enumFromInt(tree.extra[i]),
+                Node.Index, Node.OptionalIndex, Token.Index => @enumFromInt(tree.extra[i]),
                 else => @compileError("bad field type: " ++ @typeName(field.type)),
             };
             i += 1;
@@ -366,11 +378,11 @@ pub const Tree = struct {
     }
 
     pub fn getDirective(self: Tree, node_index: Node.Index) ?[]const u8 {
-        const tag = self.nodes.items(.tag)[node_index];
+        const tag = self.nodeTag(node_index);
         switch (tag) {
             .doc => return null,
-            .doc_directive => {
-                const data = self.nodes.items(.data)[node_index];
+            .doc_with_directive => {
+                const data = self.nodeData(node_index).doc_with_directive;
                 return self.getRaw(data.directive, data.directive);
             },
             else => unreachable,
@@ -390,6 +402,7 @@ pub const Tree = struct {
 
 const Parser = struct {
     allocator: Allocator,
+    source: []const u8,
     token_it: *TokenIterator,
     line_cols: *std.AutoHashMapUnmanaged(Token.Index, LineCol),
     docs: std.ArrayListUnmanaged(Node.Index) = .empty,
@@ -440,7 +453,7 @@ const Parser = struct {
             val.* = switch (field.type) {
                 u32 => @field(data, field.name),
                 i32 => @bitCast(@field(data, field.name)),
-                Node.Index => @intFromEnum(@field(data, field.name)),
+                Node.Index, Node.OptionalIndex, Token.Index => @intFromEnum(@field(data, field.name)),
                 else => @compileError("bad field type: " ++ @typeName(field.type)),
             };
         }
@@ -542,10 +555,10 @@ const Parser = struct {
         self.nodes.set(node_index, .{
             .tag = if (directive == null) .doc else .doc_with_directive,
             .data = if (directive == null) .{
-                .value = value,
+                .value = value_index,
             } else .{
                 .doc_with_directive = .{
-                    .value = value,
+                    .value = value_index,
                     .directive = directive.?,
                 },
             },
@@ -608,7 +621,7 @@ const Parser = struct {
                 if (self.getCol(value_start) < self.getCol(key_pos)) {
                     return error.MalformedYaml;
                 }
-                if (v.cast(Node.Value)) |_| {
+                if (self.nodes.items(.tag)[@intFromEnum(v)] == .value) {
                     if (self.getCol(value_start) == self.getCol(key_pos)) {
                         return error.MalformedYaml;
                     }
@@ -628,10 +641,10 @@ const Parser = struct {
         try self.extra.ensureUnusedCapacity(gpa, entries.items.len * 2 + 1);
         const extra_index: u32 = @intCast(self.extra.items.len);
 
-        self.addExtraAssumeCapacity(@as(u32, @intCast(entries.items.len)));
+        _ = self.addExtraAssumeCapacity(Map{ .map_len = @intCast(entries.items.len) });
 
         for (entries.items) |entry| {
-            self.addExtraAssumeCapacity(entry);
+            _ = self.addExtraAssumeCapacity(entry);
         }
 
         self.nodes.set(node_index, .{
@@ -652,7 +665,7 @@ const Parser = struct {
         const node_index = try self.nodes.addOne(gpa);
         const node_start = self.token_it.pos;
 
-        var values: std.ArrayListUnmanaged(Node.Index) = .empty;
+        var values: std.ArrayListUnmanaged(List.Entry) = .empty;
         defer values.deinit(gpa);
 
         const first_col = self.getCol(node_start);
@@ -680,7 +693,7 @@ const Parser = struct {
             const value_index = try self.value();
             if (value_index == .none) return error.MalformedYaml;
 
-            try values.append(gpa, value_index.unwrap());
+            try values.append(gpa, .{ .value = value_index.unwrap().? });
         }
 
         const node_end: Token.Index = @enumFromInt(@intFromEnum(self.token_it.pos) - 1);
@@ -690,10 +703,10 @@ const Parser = struct {
         try self.extra.ensureUnusedCapacity(gpa, values.items.len + 1);
         const extra_index: u32 = @intCast(self.extra.items.len);
 
-        self.addExtraAssumeCapacity(@as(u32, @intCast(values.items.len)));
+        _ = self.addExtraAssumeCapacity(List{ .list_len = @intCast(values.items.len) });
 
-        for (values.items) |index| {
-            self.addExtraAssumeCapacity(index);
+        for (values.items) |entry| {
+            _ = self.addExtraAssumeCapacity(entry);
         }
 
         self.nodes.set(node_index, .{
@@ -714,7 +727,7 @@ const Parser = struct {
         const node_index = try self.nodes.addOne(gpa);
         const node_start = self.token_it.pos;
 
-        var values: std.ArrayListUnmanaged(Node.Index) = .empty;
+        var values: std.ArrayListUnmanaged(List.Entry) = .empty;
         defer values.deinit(gpa);
 
         log.debug("(list) begin {s}@{d}", .{ @tagName(self.getToken(node_start).id), node_start });
@@ -732,18 +745,18 @@ const Parser = struct {
             const value_index = try self.value();
             if (value_index == .none) return error.MalformedYaml;
 
-            try values.append(gpa, value_index);
+            try values.append(gpa, .{ .value = value_index.unwrap().? });
         };
 
-        log.debug("(list) end {s}@{d}", .{ @tagName(self.tree.getToken(node_end).id), node_end });
+        log.debug("(list) end {s}@{d}", .{ @tagName(self.getToken(node_end).id), node_end });
 
-        try self.extra.ensureUnusedCapacity(gpa, values.item.len + 1);
+        try self.extra.ensureUnusedCapacity(gpa, values.items.len + 1);
         const extra_index: u32 = @intCast(self.extra.items.len);
 
-        self.addExtraAssumeCapacity(@as(u32, @intCast(values.items.len)));
+        _ = self.addExtraAssumeCapacity(List{ .list_len = @intCast(values.items.len) });
 
         for (values.items) |index| {
-            self.addExtraAssumeCapacity(index);
+            _ = self.addExtraAssumeCapacity(index);
         }
 
         self.nodes.set(node_index, .{
@@ -765,19 +778,22 @@ const Parser = struct {
         const node_start = self.token_it.pos;
 
         // TODO handle multiline strings in new block scope
-        const node_end, const string = while (self.token_it.next()) |tok| {
+        var result: ?struct { Token.Index, String } = null;
+        while (self.token_it.next()) |tok| {
             switch (tok.id) {
                 .single_quoted => {
                     const node_end: Token.Index = @enumFromInt(@intFromEnum(self.token_it.pos) - 1);
-                    const raw = self.tree.getRaw(node_start, node_end);
+                    const raw = self.getRaw(node_start, node_end);
                     const string = try self.parseSingleQuoted(raw);
-                    break .{ node_end, string };
+                    result = .{ node_end, string };
+                    break;
                 },
                 .double_quoted => {
                     const node_end: Token.Index = @enumFromInt(@intFromEnum(self.token_it.pos) - 1);
-                    const raw = self.tree.getRaw(node_start, node_end);
+                    const raw = self.getRaw(node_start, node_end);
                     const string = try self.parseDoubleQuoted(raw);
-                    break .{ node_end, string };
+                    result = .{ node_end, string };
+                    break;
                 },
                 .literal => {},
                 .space => {
@@ -786,21 +802,24 @@ const Parser = struct {
                     if (self.token_it.peek()) |peek| {
                         if (peek.id != .literal) {
                             const node_end: Token.Index = @enumFromInt(trailing);
-                            const raw = self.tree.getRaw(node_start, node_end);
+                            const raw = self.getRaw(node_start, node_end);
                             const string = try self.addString(raw);
-                            break .{ node_end, string };
+                            result = .{ node_end, string };
+                            break;
                         }
                     }
                 },
                 else => {
                     self.token_it.seekBy(-1);
                     const node_end: Token.Index = @enumFromInt(@intFromEnum(self.token_it.pos) - 1);
-                    const raw = self.tree.getRaw(node_start, node_end);
+                    const raw = self.getRaw(node_start, node_end);
                     const string = try self.addString(raw);
-                    break .{ node_end, string };
+                    result = .{ node_end, string };
+                    break;
                 },
             }
-        };
+        }
+        const node_end, const string = result orelse return error.MalformedYaml;
 
         log.debug("(leaf) {s}", .{self.getRaw(node_start, node_end)});
 
@@ -963,7 +982,7 @@ const Parser = struct {
     }
 
     fn getToken(self: Parser, index: Token.Index) Token {
-        return self.tokens[@intFromEnum(index)];
+        return self.token_it.buffer[@intFromEnum(index)];
     }
 };
 
@@ -975,7 +994,7 @@ pub fn parse(gpa: Allocator, source: []const u8) !Tree {
     var line: usize = 0;
     var prev_line_last_col: usize = 0;
 
-    var line_cols: std.AutoArrayHashMapUnmanaged(Token.Index, LineCol) = .empty;
+    var line_cols: std.AutoHashMapUnmanaged(Token.Index, LineCol) = .empty;
     defer line_cols.deinit(gpa);
 
     while (true) {
@@ -1001,6 +1020,7 @@ pub fn parse(gpa: Allocator, source: []const u8) !Tree {
     var it = TokenIterator{ .buffer = tokens.items };
     var parser = Parser{
         .allocator = gpa,
+        .source = source,
         .token_it = &it,
         .line_cols = &line_cols,
     };
@@ -1027,7 +1047,7 @@ pub fn parse(gpa: Allocator, source: []const u8) !Tree {
         .source = source,
         .tokens = try tokens.toOwnedSlice(gpa),
         .docs = try parser.docs.toOwnedSlice(gpa),
-        .nodes = try parser.nodes.toOwnedSlice(),
+        .nodes = parser.nodes.toOwnedSlice(),
         .extra = try parser.extra.toOwnedSlice(gpa),
         .string_bytes = try parser.string_bytes.toOwnedSlice(gpa),
     };

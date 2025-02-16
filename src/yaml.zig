@@ -154,37 +154,40 @@ pub const Value = union(enum) {
     }
 
     fn fromNode(arena: Allocator, tree: Tree, node_index: Node.Index) YamlError!Value {
-        const tag = tree.nodes.items(.tag)[node_index];
+        const tag = tree.nodeTag(node_index);
         switch (tag) {
             .doc => {
-                const inner = tree.nodes.items(.data)[node_index].unwrap() orelse
+                const inner = tree.nodeData(node_index).value.unwrap() orelse
                     // empty doc
                     return Value{ .empty = {} };
                 return Value.fromNode(arena, tree, inner);
             },
             .doc_with_directive => {
-                const inner = tree.nodes.items(.data)[node_index].value.unwrap() orelse
+                const inner = tree.nodeData(node_index).doc_with_directive.value.unwrap() orelse
                     // empty doc
                     return Value{ .empty = {} };
                 return Value.fromNode(arena, tree, inner);
             },
             .map => {
-                const extra_index = tree.nodes.items(.map)[node_index].extra;
-                const map, var extra_end = tree.extraData(parse_util.Map, extra_index);
+                const extra_index = tree.nodeData(node_index).extra;
+                const map = tree.extraData(parse_util.Map, extra_index);
 
                 // TODO use ContextAdapted HashMap and do not duplicate keys, intern
                 // in a contiguous string buffer.
                 var out_map = std.StringArrayHashMap(Value).init(arena);
-                try out_map.ensureUnusedCapacity(map.map_len);
+                try out_map.ensureUnusedCapacity(map.data.map_len);
 
-                for (0..map.map_len) |_| {
-                    const entry, extra_end = tree.extraData(Map.Entry, extra_end);
-                    const key = try arena.dupe(u8, tree.getRaw(entry.key, entry.key));
+                var extra_end = map.end;
+                for (0..map.data.map_len) |_| {
+                    const entry = tree.extraData(parse_util.Map.Entry, extra_end);
+                    extra_end = entry.end;
+
+                    const key = try arena.dupe(u8, tree.getRaw(entry.data.key, entry.data.key));
                     const gop = out_map.getOrPutAssumeCapacity(key);
                     if (gop.found_existing) {
                         return error.DuplicateMapKey;
                     }
-                    const value = if (entry.value.unwrap()) |value|
+                    const value = if (entry.data.value.unwrap()) |value|
                         try Value.fromNode(arena, tree, value)
                     else
                         .empty;
@@ -194,22 +197,25 @@ pub const Value = union(enum) {
                 return Value{ .map = out_map };
             },
             .list => {
-                const extra_index = tree.nodes.items(.list)[node_index].extra;
-                const list, var extra_end = tree.extraData(parse_util.List, extra_index);
+                const extra_index = tree.nodeData(node_index).extra;
+                const list = tree.extraData(parse_util.List, extra_index);
 
                 var out_list = std.ArrayList(Value).init(arena);
-                try out_list.ensureUnusedCapacity(list.list_len);
+                try out_list.ensureUnusedCapacity(list.data.list_len);
 
-                for (0..list.list_len) |_| {
-                    const elem, extra_end = tree.extraData(Node.Index, extra_end);
-                    const value = try Value.fromNode(arena, tree, elem);
+                var extra_end = list.end;
+                for (0..list.data.list_len) |_| {
+                    const elem = tree.extraData(parse_util.List.Entry, extra_end);
+                    extra_end = list.end;
+
+                    const value = try Value.fromNode(arena, tree, elem.data.value);
                     out_list.appendAssumeCapacity(value);
                 }
 
                 return Value{ .list = try out_list.toOwnedSlice() };
             },
             .value => {
-                const string = tree.nodes.items(.value)[node_index].string;
+                const string = tree.nodeData(node_index).string;
                 const raw = string.slice(tree);
 
                 try_int: {
@@ -337,8 +343,8 @@ pub const Value = union(enum) {
 
 pub const Yaml = struct {
     arena: ArenaAllocator,
-    tree: ?Tree = null,
     docs: std.ArrayList(Value),
+    tree: Tree = undefined,
 
     pub fn deinit(self: *Yaml) void {
         self.arena.deinit();
@@ -351,10 +357,10 @@ pub const Yaml = struct {
         const tree = try parse_util.parse(arena.allocator(), source);
 
         var docs = std.ArrayList(Value).init(arena.allocator());
-        try docs.ensureTotalCapacityPrecise(tree.docs.items.len);
+        try docs.ensureTotalCapacityPrecise(tree.docs.len);
 
-        for (tree.docs.items) |node| {
-            const value = try Value.fromNode(arena.allocator(), &tree, node);
+        for (tree.docs) |node| {
+            const value = try Value.fromNode(arena.allocator(), tree, node);
             docs.appendAssumeCapacity(value);
         }
 
@@ -521,9 +527,9 @@ pub const Yaml = struct {
     }
 
     pub fn stringify(self: Yaml, writer: anytype) !void {
-        for (self.docs.items, 0..) |doc, i| {
+        for (self.docs.items, self.tree.docs) |doc, node| {
             try writer.writeAll("---");
-            if (self.tree.?.getDirective(i)) |directive| {
+            if (self.tree.getDirective(node)) |directive| {
                 try writer.print(" !{s}", .{directive});
             }
             try writer.writeByte('\n');
