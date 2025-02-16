@@ -99,8 +99,8 @@ pub const List = struct {
 pub const String = enum(u32) {
     _,
 
-    pub fn slice(index: String, bytes: []const u8) [:0]const u8 {
-        const start_slice = bytes[@intFromEnum(index)..];
+    pub fn slice(index: String, tree: Tree) [:0]const u8 {
+        const start_slice = tree.string_bytes[@intFromEnum(index)..];
         return start_slice[0..mem.indexOfScalar(u8, start_slice, 0).? :0];
     }
 };
@@ -392,11 +392,11 @@ const Parser = struct {
     allocator: Allocator,
     token_it: *TokenIterator,
     line_cols: *std.AutoHashMapUnmanaged(Token.Index, LineCol),
-    docs: std.ArrayListUnmanaged(Node.Index) = .{},
-    nodes: std.MultiArrayList(Node) = .{},
-    nodes_scopes: std.AutoHashMapUnmanaged(Node.Index, Scope) = .{},
-    extra: std.ArrayListUnmanaged(u32) = .{},
-    string_bytes: std.ArrayListUnmanaged(u8) = .{},
+    docs: std.ArrayListUnmanaged(Node.Index) = .empty,
+    nodes: std.MultiArrayList(Node) = .empty,
+    nodes_scopes: std.AutoHashMapUnmanaged(Node.Index, Scope) = .empty,
+    extra: std.ArrayListUnmanaged(u32) = .empty,
+    string_bytes: std.ArrayListUnmanaged(u8) = .empty,
 
     const Scope = struct {
         start: Token.Index,
@@ -564,7 +564,7 @@ const Parser = struct {
         const node_index = try self.nodes.addOne(gpa);
         const node_start = self.token_it.pos;
 
-        var entries: std.ArrayListUnmanaged(Map.Entry) = .{};
+        var entries: std.ArrayListUnmanaged(Map.Entry) = .empty;
         defer entries.deinit(gpa);
 
         log.debug("(map) begin {s}@{d}", .{ @tagName(self.getToken(node_start).id), node_start });
@@ -651,7 +651,7 @@ const Parser = struct {
         const node_index = try self.nodes.addOne(gpa);
         const node_start = self.token_it.pos;
 
-        var values: std.ArrayListUnmanaged(Node.Index) = .{};
+        var values: std.ArrayListUnmanaged(Node.Index) = .empty;
         defer values.deinit(gpa);
 
         const first_col = self.getCol(node_start);
@@ -706,39 +706,52 @@ const Parser = struct {
         return @as(Node.Index, @enumFromInt(node_index)).toOptional();
     }
 
-    fn list_bracketed(self: *Parser) ParseError!*Node {
-        const node = try self.allocator.create(Node.List);
-        errdefer self.allocator.destroy(node);
-        node.* = .{};
-        node.base.tree = self.tree;
-        node.base.start = self.token_it.pos;
-        errdefer {
-            for (node.values.items) |val| {
-                val.deinit(self.allocator);
-            }
-            node.values.deinit(self.allocator);
-        }
+    fn list_bracketed(self: *Parser) ParseError!Node.OptionalIndex {
+        const gpa = self.allocator;
+        const node_index = try self.nodes.addOne(gpa);
+        const node_start = self.token_it.pos;
 
-        log.debug("(list) begin {s}@{d}", .{ @tagName(self.tree.getToken(node.base.start).id), node.base.start });
+        var values: std.ArrayListUnmanaged(Node.Index) = .empty;
+        defer values.deinit(gpa);
+
+        log.debug("(list) begin {s}@{d}", .{ @tagName(self.getToken(node_start).id), node_start });
 
         _ = try self.expectToken(.flow_seq_start, &.{});
 
-        while (true) {
+        const node_end: Token.Index = while (true) {
             self.eatCommentsAndSpace(&.{.comment});
 
-            if (self.eatToken(.flow_seq_end, &.{.comment})) |pos| {
-                node.base.end = pos;
-                break;
-            }
+            if (self.eatToken(.flow_seq_end, &.{.comment})) |pos|
+                break pos;
+
             _ = self.eatToken(.comma, &.{.comment});
 
-            const val = (try self.value()) orelse return error.MalformedYaml;
-            try node.values.append(self.allocator, val);
+            const value_index = try self.value();
+            if (value_index == .none) return error.MalformedYaml;
+
+            try values.append(gpa, value_index);
+        };
+
+        log.debug("(list) end {s}@{d}", .{ @tagName(self.tree.getToken(node_end).id), node_end });
+
+        try self.extra.ensureUnusedCapacity(gpa, values.item.len);
+        const extra_index: u32 = @intCast(self.extra.items.len);
+
+        for (values.items) |index| {
+            self.addExtraAssumeCapacity(index);
         }
 
-        log.debug("(list) end {s}@{d}", .{ @tagName(self.tree.getToken(node.base.end).id), node.base.end });
+        self.nodes.set(node_index, .{
+            .tag = .list,
+            .data = .{ .extra = @enumFromInt(extra_index) },
+        });
 
-        return &node.base;
+        try self.nodes_scopes.putNoClobber(gpa, @enumFromInt(node_index), .{
+            .start = node_start,
+            .end = node_end,
+        });
+
+        return @as(Node.Index, @enumFromInt(node_index)).toOptional();
     }
 
     fn leaf_value(self: *Parser) ParseError!Node.OptionalIndex {
@@ -747,17 +760,19 @@ const Parser = struct {
         const node_start = self.token_it.pos;
 
         // TODO handle multiline strings in new block scope
-        const string = while (self.token_it.next()) |tok| {
+        const node_end, const string = while (self.token_it.next()) |tok| {
             switch (tok.id) {
                 .single_quoted => {
                     const node_end: Token.Index = @enumFromInt(@intFromEnum(self.token_it.pos) - 1);
                     const raw = self.tree.getRaw(node_start, node_end);
-                    break try self.parseSingleQuoted(raw);
+                    const string = try self.parseSingleQuoted(raw);
+                    break .{ node_end, string };
                 },
                 .double_quoted => {
                     const node_end: Token.Index = @enumFromInt(@intFromEnum(self.token_it.pos) - 1);
                     const raw = self.tree.getRaw(node_start, node_end);
-                    break try self.parseDoubleQuoted(raw);
+                    const string = try self.parseDoubleQuoted(raw);
+                    break .{ node_end, string };
                 },
                 .literal => {},
                 .space => {
@@ -767,7 +782,8 @@ const Parser = struct {
                         if (peek.id != .literal) {
                             const node_end: Token.Index = @enumFromInt(trailing);
                             const raw = self.tree.getRaw(node_start, node_end);
-                            break try self.addString(raw);
+                            const string = try self.addString(raw);
+                            break .{ node_end, string };
                         }
                     }
                 },
@@ -775,16 +791,22 @@ const Parser = struct {
                     self.token_it.seekBy(-1);
                     const node_end: Token.Index = @enumFromInt(@intFromEnum(self.token_it.pos) - 1);
                     const raw = self.tree.getRaw(node_start, node_end);
-                    break try self.addString(raw);
+                    const string = try self.addString(raw);
+                    break .{ node_end, string };
                 },
             }
         };
 
-        log.debug("(leaf) {s}", .{string.slice(self.string_bytes)});
+        log.debug("(leaf) {s}", .{self.getRaw(node_start, node_end)});
 
         self.nodes.set(node_index, .{
             .tag = .value,
             .data = .{ .string = string },
+        });
+
+        try self.nodes_scopes.putNoClobber(gpa, @enumFromInt(node_index), .{
+            .start = node_start,
+            .end = node_end,
         });
 
         return @as(Node.Index, @enumFromInt(node_index)).toOptional();
@@ -942,13 +964,13 @@ const Parser = struct {
 
 pub fn parse(gpa: Allocator, source: []const u8) !Tree {
     var tokenizer = Tokenizer{ .buffer = source };
-    var tokens: std.ArrayListUnmanaged(Token) = .{};
+    var tokens: std.ArrayListUnmanaged(Token) = .empty;
     defer tokens.deinit(gpa);
 
     var line: usize = 0;
     var prev_line_last_col: usize = 0;
 
-    var line_cols: std.AutoArrayHashMapUnmanaged(Token.Index, LineCol) = .{};
+    var line_cols: std.AutoArrayHashMapUnmanaged(Token.Index, LineCol) = .empty;
     defer line_cols.deinit(gpa);
 
     while (true) {
