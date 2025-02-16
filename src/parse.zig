@@ -15,30 +15,55 @@ pub const Node2 = struct {
 
     pub const Tag = enum(u8) {
         /// Comprises an index into another Node.
-        /// Payload is doc.
+        /// Payload is value.
         doc,
 
         /// Doc with directive.
-        /// Payload is doc_payload, where extra payload is Directive.
         doc_directive,
 
         /// Comprises an index into extras where payload is Map.
+        /// Payload is extras.
         map,
+
+        /// Comprises an index into extras where payload is List.
+        /// Payload is extras.
         list,
+
+        /// Payload is string.
         value,
     };
 
     pub const Data = union {
-        doc: Index,
+        value: Index,
 
-        doc_payload: struct {
+        doc_with_directive: struct {
             value: Index,
-            payload: u32,
+            directive: Token.Index,
         },
+
+        string: String,
+
+        extras: Extra,
     };
 
     pub const Index = enum(u32) {
         _,
+
+        pub fn toOptional(ind: Index) OptionalIndex {
+            const result: OptionalIndex = @enumFromInt(@intFromEnum(ind));
+            assert(result != .none);
+            return result;
+        }
+    };
+
+    pub const OptionalIndex = enum(u32) {
+        none = std.math.maxInt(u32),
+        _,
+
+        pub fn unwrap(opt: OptionalIndex) ?Index {
+            if (opt == .none) return null;
+            return @enumFromInt(@intFromEnum(opt));
+        }
     };
 
     // Make sure we don't accidentally make nodes bigger than expected.
@@ -50,8 +75,55 @@ pub const Node2 = struct {
     }
 };
 
-pub const Directive = struct {
-    token_index: Token.Index,
+pub const Extra = enum(u32) {
+    _,
+};
+
+/// Trailing is a list of Entries.
+pub const Map2 = struct {
+    map_len: u32,
+};
+
+pub const Entry2 = struct {
+    key: Token.Index,
+    value: Node2.OptionalIndex,
+};
+
+/// Index into string_bytes.
+pub const String = enum(u32) {
+    _,
+
+    const Table = std.HashMapUnmanaged(String, void, TableContext, std.hash_map.default_max_load_percentage);
+
+    const TableContext = struct {
+        bytes: []const u8,
+
+        pub fn eql(_: @This(), a: String, b: String) bool {
+            return a == b;
+        }
+
+        pub fn hash(ctx: @This(), key: String) u64 {
+            return std.hash_map.hashString(mem.sliceTo(ctx.bytes[@intFromEnum(key)..], 0));
+        }
+    };
+
+    const TableIndexAdapter = struct {
+        bytes: []const u8,
+
+        pub fn eql(ctx: @This(), a: []const u8, b: String) bool {
+            return mem.eql(u8, a, mem.sliceTo(ctx.bytes[@intFromEnum(b)..], 0));
+        }
+
+        pub fn hash(_: @This(), adapted_key: []const u8) u64 {
+            assert(mem.indexOfScalar(u8, adapted_key, 0) == null);
+            return std.hash_map.hashString(adapted_key);
+        }
+    };
+
+    pub fn slice(index: String, tree: *const Tree) [:0]const u8 {
+        const start_slice = tree.string_bytes.items[@intFromEnum(index)..];
+        return start_slice[0..mem.indexOfScalar(u8, start_slice, 0).? :0];
+    }
 };
 
 pub const ParseError = error{
