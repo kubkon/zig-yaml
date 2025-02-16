@@ -346,9 +346,9 @@ pub const Tree = struct {
 
     /// Returns the requested data, as well as the new index which is at the start of the
     /// trailers for the object.
-    pub fn extraData(tree: Tree, comptime T: type, index: usize) struct { data: T, end: usize } {
+    pub fn extraData(tree: Tree, comptime T: type, index: Extra) struct { data: T, end: Extra } {
         const fields = std.meta.fields(T);
-        var i: usize = index;
+        var i = @intFromEnum(index);
         var result: T = undefined;
         inline for (fields) |field| {
             @field(result, field.name) = switch (field.type) {
@@ -361,7 +361,7 @@ pub const Tree = struct {
         }
         return .{
             .data = result,
-            .end = i,
+            .end = @enumFromInt(i),
         };
     }
 
@@ -625,12 +625,13 @@ const Parser = struct {
 
         log.debug("(map) end {s}@{d}", .{ @tagName(self.getToken(node_end).id), node_end });
 
-        try self.extra.ensureUnusedCapacity(gpa, entries.items.len * 2);
+        try self.extra.ensureUnusedCapacity(gpa, entries.items.len * 2 + 1);
         const extra_index: u32 = @intCast(self.extra.items.len);
 
+        self.addExtraAssumeCapacity(@as(u32, @intCast(entries.items.len)));
+
         for (entries.items) |entry| {
-            self.addExtraAssumeCapacity(entry.key);
-            self.addExtraAssumeCapacity(entry.value);
+            self.addExtraAssumeCapacity(entry);
         }
 
         self.nodes.set(node_index, .{
@@ -686,8 +687,10 @@ const Parser = struct {
 
         log.debug("(list) end {s}@{d}", .{ @tagName(self.getToken(node_end).id), node_end });
 
-        try self.extra.ensureUnusedCapacity(gpa, values.items.len);
+        try self.extra.ensureUnusedCapacity(gpa, values.items.len + 1);
         const extra_index: u32 = @intCast(self.extra.items.len);
+
+        self.addExtraAssumeCapacity(@as(u32, @intCast(values.items.len)));
 
         for (values.items) |index| {
             self.addExtraAssumeCapacity(index);
@@ -734,8 +737,10 @@ const Parser = struct {
 
         log.debug("(list) end {s}@{d}", .{ @tagName(self.tree.getToken(node_end).id), node_end });
 
-        try self.extra.ensureUnusedCapacity(gpa, values.item.len);
+        try self.extra.ensureUnusedCapacity(gpa, values.item.len + 1);
         const extra_index: u32 = @intCast(self.extra.items.len);
+
+        self.addExtraAssumeCapacity(@as(u32, @intCast(values.items.len)));
 
         for (values.items) |index| {
             self.addExtraAssumeCapacity(index);

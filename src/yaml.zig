@@ -8,11 +8,11 @@ const Allocator = mem.Allocator;
 const ArenaAllocator = std.heap.ArenaAllocator;
 
 pub const Tokenizer = @import("Tokenizer.zig");
-pub const parse = @import("parse.zig");
+pub const parse_util = @import("parse.zig");
 
-const Node = parse.Node;
-const Tree = parse.Tree;
-const ParseError = parse.ParseError;
+const Node = parse_util.Node;
+const Tree = parse_util.Tree;
+const ParseError = parse_util.ParseError;
 const supportedTruthyBooleanValue: [4][]const u8 = .{ "y", "yes", "on", "true" };
 const supportedFalsyBooleanValue: [4][]const u8 = .{ "n", "no", "off", "false" };
 
@@ -153,75 +153,92 @@ pub const Value = union(enum) {
         };
     }
 
-    fn fromNode(arena: Allocator, tree: *const Tree, node: *const Node) YamlError!Value {
-        if (node.cast(Node.Doc)) |doc| {
-            const inner = doc.value orelse {
-                // empty doc
-                return Value{ .empty = {} };
-            };
-            return Value.fromNode(arena, tree, inner);
-        } else if (node.cast(Node.Map)) |map| {
-            // TODO use ContextAdapted HashMap and do not duplicate keys, intern
-            // in a contiguous string buffer.
-            var out_map = std.StringArrayHashMap(Value).init(arena);
-            try out_map.ensureUnusedCapacity(math.cast(u32, map.values.items.len) orelse return error.Overflow);
+    fn fromNode(arena: Allocator, tree: Tree, node_index: Node.Index) YamlError!Value {
+        const tag = tree.nodes.items(.tag)[node_index];
+        switch (tag) {
+            .doc => {
+                const inner = tree.nodes.items(.data)[node_index].unwrap() orelse
+                    // empty doc
+                    return Value{ .empty = {} };
+                return Value.fromNode(arena, tree, inner);
+            },
+            .doc_with_directive => {
+                const inner = tree.nodes.items(.data)[node_index].value.unwrap() orelse
+                    // empty doc
+                    return Value{ .empty = {} };
+                return Value.fromNode(arena, tree, inner);
+            },
+            .map => {
+                const extra_index = tree.nodes.items(.map)[node_index].extra;
+                const map, var extra_end = tree.extraData(parse_util.Map, extra_index);
 
-            for (map.values.items) |entry| {
-                const key = try arena.dupe(u8, tree.getRaw(entry.key, entry.key));
-                const gop = out_map.getOrPutAssumeCapacity(key);
-                if (gop.found_existing) {
-                    return error.DuplicateMapKey;
+                // TODO use ContextAdapted HashMap and do not duplicate keys, intern
+                // in a contiguous string buffer.
+                var out_map = std.StringArrayHashMap(Value).init(arena);
+                try out_map.ensureUnusedCapacity(map.map_len);
+
+                for (0..map.map_len) |_| {
+                    const entry, extra_end = tree.extraData(Map.Entry, extra_end);
+                    const key = try arena.dupe(u8, tree.getRaw(entry.key, entry.key));
+                    const gop = out_map.getOrPutAssumeCapacity(key);
+                    if (gop.found_existing) {
+                        return error.DuplicateMapKey;
+                    }
+                    const value = if (entry.value.unwrap()) |value|
+                        try Value.fromNode(arena, tree, value)
+                    else
+                        .empty;
+                    gop.value_ptr.* = value;
                 }
-                const value = if (entry.value) |value|
-                    try Value.fromNode(arena, tree, value)
-                else
-                    .empty;
-                gop.value_ptr.* = value;
-            }
 
-            return Value{ .map = out_map };
-        } else if (node.cast(Node.List)) |list| {
-            var out_list = std.ArrayList(Value).init(arena);
-            try out_list.ensureUnusedCapacity(list.values.items.len);
+                return Value{ .map = out_map };
+            },
+            .list => {
+                const extra_index = tree.nodes.items(.list)[node_index].extra;
+                const list, var extra_end = tree.extraData(parse_util.List, extra_index);
 
-            for (list.values.items) |elem| {
-                const value = try Value.fromNode(arena, tree, elem);
-                out_list.appendAssumeCapacity(value);
-            }
+                var out_list = std.ArrayList(Value).init(arena);
+                try out_list.ensureUnusedCapacity(list.list_len);
 
-            return Value{ .list = try out_list.toOwnedSlice() };
-        } else if (node.cast(Node.Value)) |value| {
-            const raw = tree.getRaw(node.start, node.end);
+                for (0..list.list_len) |_| {
+                    const elem, extra_end = tree.extraData(Node.Index, extra_end);
+                    const value = try Value.fromNode(arena, tree, elem);
+                    out_list.appendAssumeCapacity(value);
+                }
 
-            try_int: {
-                const int = std.fmt.parseInt(i64, raw, 0) catch break :try_int;
-                return Value{ .int = int };
-            }
+                return Value{ .list = try out_list.toOwnedSlice() };
+            },
+            .value => {
+                const string = tree.nodes.items(.value)[node_index].string;
+                const raw = string.slice(tree);
 
-            try_float: {
-                const float = std.fmt.parseFloat(f64, raw) catch break :try_float;
-                return Value{ .float = float };
-            }
+                try_int: {
+                    const int = std.fmt.parseInt(i64, raw, 0) catch break :try_int;
+                    return Value{ .int = int };
+                }
 
-            if (raw.len <= 5 and raw.len > 0) {
-                const lower_raw = try std.ascii.allocLowerString(arena, raw);
-                for (supportedTruthyBooleanValue) |v| {
-                    if (std.mem.eql(u8, v, lower_raw)) {
-                        return Value{ .boolean = true };
+                try_float: {
+                    const float = std.fmt.parseFloat(f64, raw) catch break :try_float;
+                    return Value{ .float = float };
+                }
+
+                if (raw.len <= 5 and raw.len > 0) {
+                    const lower_raw = try std.ascii.allocLowerString(arena, raw);
+                    for (supportedTruthyBooleanValue) |v| {
+                        if (std.mem.eql(u8, v, lower_raw)) {
+                            return Value{ .boolean = true };
+                        }
+                    }
+
+                    for (supportedFalsyBooleanValue) |v| {
+                        if (std.mem.eql(u8, v, lower_raw)) {
+                            return Value{ .boolean = false };
+                        }
                     }
                 }
 
-                for (supportedFalsyBooleanValue) |v| {
-                    if (std.mem.eql(u8, v, lower_raw)) {
-                        return Value{ .boolean = false };
-                    }
-                }
-            }
-
-            return Value{ .string = try arena.dupe(u8, value.string_value.items) };
-        } else {
-            log.debug("Unexpected node type: {}", .{node.tag});
-            return error.UnexpectedNodeType;
+                return Value{ .string = try arena.dupe(u8, raw) };
+            },
         }
     }
 
@@ -331,8 +348,7 @@ pub const Yaml = struct {
         var arena = ArenaAllocator.init(allocator);
         errdefer arena.deinit();
 
-        var tree = Tree.init(arena.allocator());
-        try tree.parse(source);
+        const tree = try parse_util.parse(arena.allocator(), source);
 
         var docs = std.ArrayList(Value).init(arena.allocator());
         try docs.ensureTotalCapacityPrecise(tree.docs.items.len);
@@ -533,6 +549,6 @@ pub fn stringify(allocator: Allocator, input: anytype, writer: anytype) Stringif
 
 test {
     std.testing.refAllDecls(Tokenizer);
-    std.testing.refAllDecls(parse);
+    std.testing.refAllDecls(parse_util);
     _ = @import("yaml/test.zig");
 }
