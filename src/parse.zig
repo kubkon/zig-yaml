@@ -8,6 +8,52 @@ const Tokenizer = @import("Tokenizer.zig");
 const Token = Tokenizer.Token;
 const TokenIterator = Tokenizer.TokenIterator;
 
+/// TODO for each Node we need to track start-end Tokens too.
+pub const Node2 = struct {
+    tag: Tag,
+    data: Data,
+
+    pub const Tag = enum(u8) {
+        /// Comprises an index into another Node.
+        /// Payload is doc.
+        doc,
+
+        /// Doc with directive.
+        /// Payload is doc_payload, where extra payload is Directive.
+        doc_directive,
+
+        /// Comprises an index into extras where payload is Map.
+        map,
+        list,
+        value,
+    };
+
+    pub const Data = union {
+        doc: Index,
+
+        doc_payload: struct {
+            value: Index,
+            payload: u32,
+        },
+    };
+
+    pub const Index = enum(u32) {
+        _,
+    };
+
+    // Make sure we don't accidentally make nodes bigger than expected.
+    // Note that in safety builds, Zig is allowed to insert a secret field for safety checks.
+    comptime {
+        if (!std.debug.runtime_safety) {
+            assert(@sizeOf(Data) == 8);
+        }
+    }
+};
+
+pub const Directive = struct {
+    token_index: Token.Index,
+};
+
 pub const ParseError = error{
     InvalidEscapeSequence,
     MalformedYaml,
