@@ -400,29 +400,93 @@ pub const Tree = struct {
     }
 };
 
-const Parser = struct {
+pub const Parser = struct {
     allocator: Allocator,
     source: []const u8,
-    token_it: *TokenIterator,
-    line_cols: *std.AutoHashMapUnmanaged(Token.Index, LineCol),
+    token_it: TokenIterator = undefined,
+    line_cols: std.AutoHashMapUnmanaged(Token.Index, LineCol) = .empty,
     docs: std.ArrayListUnmanaged(Node.Index) = .empty,
     nodes: std.MultiArrayList(Node) = .empty,
     nodes_scopes: std.AutoHashMapUnmanaged(Node.Index, Scope) = .empty,
     extra: std.ArrayListUnmanaged(u32) = .empty,
     string_bytes: std.ArrayListUnmanaged(u8) = .empty,
 
-    const Scope = struct {
+    pub const Scope = struct {
         start: Token.Index,
         end: Token.Index,
     };
 
-    fn deinit(self: *Parser) void {
+    pub fn deinit(self: *Parser) void {
         const gpa = self.allocator;
         self.docs.deinit(gpa);
         self.nodes.deinit(gpa);
         self.nodes_scopes.deinit(gpa);
         self.extra.deinit(gpa);
         self.string_bytes.deinit(gpa);
+        self.line_cols.deinit(gpa);
+    }
+
+    pub fn parse(self: *Parser) ParseError!void {
+        const gpa = self.allocator;
+
+        var tokenizer = Tokenizer{ .buffer = self.source };
+        var tokens: std.ArrayListUnmanaged(Token) = .empty;
+        defer tokens.deinit(gpa);
+
+        var line: usize = 0;
+        var prev_line_last_col: usize = 0;
+
+        while (true) {
+            const token = tokenizer.next();
+            const tok_id: Token.Index = @enumFromInt(tokens.items.len);
+            try tokens.append(gpa, token);
+
+            try self.line_cols.putNoClobber(gpa, tok_id, .{
+                .line = line,
+                .col = token.loc.start - prev_line_last_col,
+            });
+
+            switch (token.id) {
+                .eof => break,
+                .new_line => {
+                    line += 1;
+                    prev_line_last_col = token.loc.end;
+                },
+                else => {},
+            }
+        }
+
+        self.token_it = .{ .buffer = try tokens.toOwnedSlice(gpa) };
+
+        self.eatCommentsAndSpace(&.{});
+
+        while (true) {
+            self.eatCommentsAndSpace(&.{});
+            const token = self.token_it.next() orelse break;
+
+            std.debug.print("(main) next {s}@{d}\n", .{ @tagName(token.id), @intFromEnum(self.token_it.pos) - 1 });
+
+            switch (token.id) {
+                .eof => break,
+                else => {
+                    self.token_it.seekBy(-1);
+                    const node_index = try self.doc();
+                    try self.docs.append(gpa, node_index);
+                },
+            }
+        }
+    }
+
+    pub fn toOwnedTree(self: *Parser) Allocator.Error!Tree {
+        const gpa = self.allocator;
+        return .{
+            .source = self.source,
+            .tokens = self.token_it.buffer,
+            .docs = try self.docs.toOwnedSlice(gpa),
+            .nodes = self.nodes.toOwnedSlice(),
+            .extra = try self.extra.toOwnedSlice(gpa),
+            .string_bytes = try self.string_bytes.toOwnedSlice(gpa),
+        };
     }
 
     fn addString(self: *Parser, string: []const u8) Allocator.Error!String {
@@ -985,73 +1049,6 @@ const Parser = struct {
         return self.token_it.buffer[@intFromEnum(index)];
     }
 };
-
-pub fn parse(gpa: Allocator, source: []const u8) !Tree {
-    var tokenizer = Tokenizer{ .buffer = source };
-    var tokens: std.ArrayListUnmanaged(Token) = .empty;
-    defer tokens.deinit(gpa);
-
-    var line: usize = 0;
-    var prev_line_last_col: usize = 0;
-
-    var line_cols: std.AutoHashMapUnmanaged(Token.Index, LineCol) = .empty;
-    defer line_cols.deinit(gpa);
-
-    while (true) {
-        const token = tokenizer.next();
-        const tok_id: Token.Index = @enumFromInt(tokens.items.len);
-        try tokens.append(gpa, token);
-
-        try line_cols.putNoClobber(gpa, tok_id, .{
-            .line = line,
-            .col = token.loc.start - prev_line_last_col,
-        });
-
-        switch (token.id) {
-            .eof => break,
-            .new_line => {
-                line += 1;
-                prev_line_last_col = token.loc.end;
-            },
-            else => {},
-        }
-    }
-
-    var it = TokenIterator{ .buffer = tokens.items };
-    var parser = Parser{
-        .allocator = gpa,
-        .source = source,
-        .token_it = &it,
-        .line_cols = &line_cols,
-    };
-
-    parser.eatCommentsAndSpace(&.{});
-
-    while (true) {
-        parser.eatCommentsAndSpace(&.{});
-        const token = parser.token_it.next() orelse break;
-
-        log.debug("(main) next {s}@{d}", .{ @tagName(token.id), @intFromEnum(parser.token_it.pos) - 1 });
-
-        switch (token.id) {
-            .eof => break,
-            else => {
-                parser.token_it.seekBy(-1);
-                const doc = try parser.doc();
-                try parser.docs.append(gpa, doc);
-            },
-        }
-    }
-
-    return .{
-        .source = source,
-        .tokens = try tokens.toOwnedSlice(gpa),
-        .docs = try parser.docs.toOwnedSlice(gpa),
-        .nodes = parser.nodes.toOwnedSlice(),
-        .extra = try parser.extra.toOwnedSlice(gpa),
-        .string_bytes = try parser.string_bytes.toOwnedSlice(gpa),
-    };
-}
 
 test {
     std.testing.refAllDecls(@This());

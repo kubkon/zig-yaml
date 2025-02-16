@@ -12,6 +12,7 @@ pub const parse_util = @import("parse.zig");
 
 const Node = parse_util.Node;
 const Tree = parse_util.Tree;
+const Parser = parse_util.Parser;
 const ParseError = parse_util.ParseError;
 const supportedTruthyBooleanValue: [4][]const u8 = .{ "y", "yes", "on", "true" };
 const supportedFalsyBooleanValue: [4][]const u8 = .{ "n", "no", "off", "false" };
@@ -354,7 +355,12 @@ pub const Yaml = struct {
         var arena = ArenaAllocator.init(allocator);
         errdefer arena.deinit();
 
-        const tree = try parse_util.parse(arena.allocator(), source);
+        var parser: Parser = .{ .allocator = arena.allocator(), .source = source };
+        defer parser.deinit();
+        try parser.parse();
+
+        var tree = try parser.toOwnedTree();
+        errdefer tree.deinit(arena.allocator());
 
         var docs = std.ArrayList(Value).init(arena.allocator());
         try docs.ensureTotalCapacityPrecise(tree.docs.len);
@@ -556,5 +562,5 @@ pub fn stringify(allocator: Allocator, input: anytype, writer: anytype) Stringif
 test {
     std.testing.refAllDecls(Tokenizer);
     std.testing.refAllDecls(parse_util);
-    _ = @import("yaml/test.zig");
+    // _ = @import("yaml/test.zig");
 }

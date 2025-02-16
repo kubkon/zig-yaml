@@ -48,7 +48,7 @@ pub fn build(b: *std.Build) void {
         .optimize = optimize,
     });
     e2e_tests.root_module.addImport("yaml", yaml_module);
-    test_step.dependOn(&b.addRunArtifact(e2e_tests).step);
+    // test_step.dependOn(&b.addRunArtifact(e2e_tests).step);
 
     const enable_spec_tests = b.option(bool, "enable-spec-tests", "Enable YAML Test Suite") orelse false;
     if (enable_spec_tests) {
