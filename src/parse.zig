@@ -9,7 +9,7 @@ const Token = Tokenizer.Token;
 const TokenIterator = Tokenizer.TokenIterator;
 
 /// TODO for each Node we need to track start-end Tokens too.
-pub const Node2 = struct {
+pub const Node = struct {
     tag: Tag,
     data: Data,
 
@@ -19,14 +19,15 @@ pub const Node2 = struct {
         doc,
 
         /// Doc with directive.
-        doc_directive,
+        /// Payload is doc_with_directive.
+        doc_with_directive,
 
         /// Comprises an index into extras where payload is Map.
-        /// Payload is extras.
+        /// Payload is extra.
         map,
 
         /// Comprises an index into extras where payload is List.
-        /// Payload is extras.
+        /// Payload is extra.
         list,
 
         /// Payload is string.
@@ -34,16 +35,16 @@ pub const Node2 = struct {
     };
 
     pub const Data = union {
-        value: Index,
+        value: OptionalIndex,
 
         doc_with_directive: struct {
-            value: Index,
+            value: OptionalIndex,
             directive: Token.Index,
         },
 
         string: String,
 
-        extras: Extra,
+        extra: Extra,
     };
 
     pub const Index = enum(u32) {
@@ -79,46 +80,24 @@ pub const Extra = enum(u32) {
     _,
 };
 
-/// Trailing is a list of Entries.
-pub const Map2 = struct {
+/// Trailing is a list of MapEntries.
+pub const Map = struct {
     map_len: u32,
+
+    pub const Entry = struct {
+        key: Token.Index,
+        value: Node.OptionalIndex,
+    };
 };
 
-pub const Entry2 = struct {
-    key: Token.Index,
-    value: Node2.OptionalIndex,
+/// Trailing is a list of Node indexes.
+pub const List = struct {
+    list_len: u32,
 };
 
 /// Index into string_bytes.
 pub const String = enum(u32) {
     _,
-
-    const Table = std.HashMapUnmanaged(String, void, TableContext, std.hash_map.default_max_load_percentage);
-
-    const TableContext = struct {
-        bytes: []const u8,
-
-        pub fn eql(_: @This(), a: String, b: String) bool {
-            return a == b;
-        }
-
-        pub fn hash(ctx: @This(), key: String) u64 {
-            return std.hash_map.hashString(mem.sliceTo(ctx.bytes[@intFromEnum(key)..], 0));
-        }
-    };
-
-    const TableIndexAdapter = struct {
-        bytes: []const u8,
-
-        pub fn eql(ctx: @This(), a: []const u8, b: String) bool {
-            return mem.eql(u8, a, mem.sliceTo(ctx.bytes[@intFromEnum(b)..], 0));
-        }
-
-        pub fn hash(_: @This(), adapted_key: []const u8) u64 {
-            assert(mem.indexOfScalar(u8, adapted_key, 0) == null);
-            return std.hash_map.hashString(adapted_key);
-        }
-    };
 
     pub fn slice(index: String, tree: *const Tree) [:0]const u8 {
         const start_slice = tree.string_bytes.items[@intFromEnum(index)..];
@@ -135,213 +114,213 @@ pub const ParseError = error{
     Unhandled,
 } || Allocator.Error;
 
-pub const Node = struct {
-    tag: Tag,
-    tree: *const Tree,
-    start: Token.Index,
-    end: Token.Index,
+// pub const Node = struct {
+//     tag: Tag,
+//     tree: *const Tree,
+//     start: Token.Index,
+//     end: Token.Index,
 
-    pub const Tag = enum {
-        doc,
-        map,
-        list,
-        value,
-    };
+//     pub const Tag = enum {
+//         doc,
+//         map,
+//         list,
+//         value,
+//     };
 
-    pub fn cast(self: *const Node, comptime T: type) ?*const T {
-        if (self.tag != T.base_tag) {
-            return null;
-        }
-        return @fieldParentPtr("base", self);
-    }
+//     pub fn cast(self: *const Node, comptime T: type) ?*const T {
+//         if (self.tag != T.base_tag) {
+//             return null;
+//         }
+//         return @fieldParentPtr("base", self);
+//     }
 
-    pub fn deinit(self: *Node, allocator: Allocator) void {
-        switch (self.tag) {
-            .doc => {
-                const parent: *Node.Doc = @fieldParentPtr("base", self);
-                parent.deinit(allocator);
-                allocator.destroy(parent);
-            },
-            .map => {
-                const parent: *Node.Map = @fieldParentPtr("base", self);
-                parent.deinit(allocator);
-                allocator.destroy(parent);
-            },
-            .list => {
-                const parent: *Node.List = @fieldParentPtr("base", self);
-                parent.deinit(allocator);
-                allocator.destroy(parent);
-            },
-            .value => {
-                const parent: *Node.Value = @fieldParentPtr("base", self);
-                parent.deinit(allocator);
-                allocator.destroy(parent);
-            },
-        }
-    }
+//     pub fn deinit(self: *Node, allocator: Allocator) void {
+//         switch (self.tag) {
+//             .doc => {
+//                 const parent: *Node.Doc = @fieldParentPtr("base", self);
+//                 parent.deinit(allocator);
+//                 allocator.destroy(parent);
+//             },
+//             .map => {
+//                 const parent: *Node.Map = @fieldParentPtr("base", self);
+//                 parent.deinit(allocator);
+//                 allocator.destroy(parent);
+//             },
+//             .list => {
+//                 const parent: *Node.List = @fieldParentPtr("base", self);
+//                 parent.deinit(allocator);
+//                 allocator.destroy(parent);
+//             },
+//             .value => {
+//                 const parent: *Node.Value = @fieldParentPtr("base", self);
+//                 parent.deinit(allocator);
+//                 allocator.destroy(parent);
+//             },
+//         }
+//     }
 
-    pub fn format(
-        self: *const Node,
-        comptime fmt: []const u8,
-        options: std.fmt.FormatOptions,
-        writer: anytype,
-    ) !void {
-        return switch (self.tag) {
-            .doc => @as(*const Node.Doc, @fieldParentPtr("base", self)).format(fmt, options, writer),
-            .map => @as(*const Node.Map, @fieldParentPtr("base", self)).format(fmt, options, writer),
-            .list => @as(*const Node.List, @fieldParentPtr("base", self)).format(fmt, options, writer),
-            .value => @as(*const Node.Value, @fieldParentPtr("base", self)).format(fmt, options, writer),
-        };
-    }
+//     pub fn format(
+//         self: *const Node,
+//         comptime fmt: []const u8,
+//         options: std.fmt.FormatOptions,
+//         writer: anytype,
+//     ) !void {
+//         return switch (self.tag) {
+//             .doc => @as(*const Node.Doc, @fieldParentPtr("base", self)).format(fmt, options, writer),
+//             .map => @as(*const Node.Map, @fieldParentPtr("base", self)).format(fmt, options, writer),
+//             .list => @as(*const Node.List, @fieldParentPtr("base", self)).format(fmt, options, writer),
+//             .value => @as(*const Node.Value, @fieldParentPtr("base", self)).format(fmt, options, writer),
+//         };
+//     }
 
-    pub const Doc = struct {
-        base: Node = Node{
-            .tag = Tag.doc,
-            .tree = undefined,
-            .start = undefined,
-            .end = undefined,
-        },
-        directive: ?Token.Index = null,
-        value: ?*Node = null,
+//     pub const Doc = struct {
+//         base: Node = Node{
+//             .tag = Tag.doc,
+//             .tree = undefined,
+//             .start = undefined,
+//             .end = undefined,
+//         },
+//         directive: ?Token.Index = null,
+//         value: ?*Node = null,
 
-        pub const base_tag: Node.Tag = .doc;
+//         pub const base_tag: Node.Tag = .doc;
 
-        pub fn deinit(self: *Doc, allocator: Allocator) void {
-            if (self.value) |node| {
-                node.deinit(allocator);
-            }
-        }
+//         pub fn deinit(self: *Doc, allocator: Allocator) void {
+//             if (self.value) |node| {
+//                 node.deinit(allocator);
+//             }
+//         }
 
-        pub fn format(
-            self: *const Doc,
-            comptime fmt: []const u8,
-            options: std.fmt.FormatOptions,
-            writer: anytype,
-        ) !void {
-            _ = options;
-            _ = fmt;
-            if (self.directive) |id| {
-                try std.fmt.format(writer, "{{ ", .{});
-                const directive = self.base.tree.getRaw(id, id);
-                try std.fmt.format(writer, ".directive = {s}, ", .{directive});
-            }
-            if (self.value) |node| {
-                try std.fmt.format(writer, "{}", .{node});
-            }
-            if (self.directive != null) {
-                try std.fmt.format(writer, " }}", .{});
-            }
-        }
-    };
+//         pub fn format(
+//             self: *const Doc,
+//             comptime fmt: []const u8,
+//             options: std.fmt.FormatOptions,
+//             writer: anytype,
+//         ) !void {
+//             _ = options;
+//             _ = fmt;
+//             if (self.directive) |id| {
+//                 try std.fmt.format(writer, "{{ ", .{});
+//                 const directive = self.base.tree.getRaw(id, id);
+//                 try std.fmt.format(writer, ".directive = {s}, ", .{directive});
+//             }
+//             if (self.value) |node| {
+//                 try std.fmt.format(writer, "{}", .{node});
+//             }
+//             if (self.directive != null) {
+//                 try std.fmt.format(writer, " }}", .{});
+//             }
+//         }
+//     };
 
-    pub const Map = struct {
-        base: Node = Node{
-            .tag = Tag.map,
-            .tree = undefined,
-            .start = undefined,
-            .end = undefined,
-        },
-        values: std.ArrayListUnmanaged(Entry) = .{},
+//     pub const Map = struct {
+//         base: Node = Node{
+//             .tag = Tag.map,
+//             .tree = undefined,
+//             .start = undefined,
+//             .end = undefined,
+//         },
+//         values: std.ArrayListUnmanaged(Entry) = .{},
 
-        pub const base_tag: Node.Tag = .map;
+//         pub const base_tag: Node.Tag = .map;
 
-        pub const Entry = struct {
-            key: Token.Index,
-            value: ?*Node,
-        };
+//         pub const Entry = struct {
+//             key: Token.Index,
+//             value: ?*Node,
+//         };
 
-        pub fn deinit(self: *Map, allocator: Allocator) void {
-            for (self.values.items) |entry| {
-                if (entry.value) |value| {
-                    value.deinit(allocator);
-                }
-            }
-            self.values.deinit(allocator);
-        }
+//         pub fn deinit(self: *Map, allocator: Allocator) void {
+//             for (self.values.items) |entry| {
+//                 if (entry.value) |value| {
+//                     value.deinit(allocator);
+//                 }
+//             }
+//             self.values.deinit(allocator);
+//         }
 
-        pub fn format(
-            self: *const Map,
-            comptime fmt: []const u8,
-            options: std.fmt.FormatOptions,
-            writer: anytype,
-        ) !void {
-            _ = options;
-            _ = fmt;
-            try std.fmt.format(writer, "{{ ", .{});
-            for (self.values.items) |entry| {
-                const key = self.base.tree.getRaw(entry.key, entry.key);
-                if (entry.value) |value| {
-                    try std.fmt.format(writer, "{s} => {}, ", .{ key, value });
-                } else {
-                    try std.fmt.format(writer, "{s} => null, ", .{key});
-                }
-            }
-            return std.fmt.format(writer, " }}", .{});
-        }
-    };
+//         pub fn format(
+//             self: *const Map,
+//             comptime fmt: []const u8,
+//             options: std.fmt.FormatOptions,
+//             writer: anytype,
+//         ) !void {
+//             _ = options;
+//             _ = fmt;
+//             try std.fmt.format(writer, "{{ ", .{});
+//             for (self.values.items) |entry| {
+//                 const key = self.base.tree.getRaw(entry.key, entry.key);
+//                 if (entry.value) |value| {
+//                     try std.fmt.format(writer, "{s} => {}, ", .{ key, value });
+//                 } else {
+//                     try std.fmt.format(writer, "{s} => null, ", .{key});
+//                 }
+//             }
+//             return std.fmt.format(writer, " }}", .{});
+//         }
+//     };
 
-    pub const List = struct {
-        base: Node = Node{
-            .tag = Tag.list,
-            .tree = undefined,
-            .start = undefined,
-            .end = undefined,
-        },
-        values: std.ArrayListUnmanaged(*Node) = .{},
+//     pub const List = struct {
+//         base: Node = Node{
+//             .tag = Tag.list,
+//             .tree = undefined,
+//             .start = undefined,
+//             .end = undefined,
+//         },
+//         values: std.ArrayListUnmanaged(*Node) = .{},
 
-        pub const base_tag: Node.Tag = .list;
+//         pub const base_tag: Node.Tag = .list;
 
-        pub fn deinit(self: *List, allocator: Allocator) void {
-            for (self.values.items) |node| {
-                node.deinit(allocator);
-            }
-            self.values.deinit(allocator);
-        }
+//         pub fn deinit(self: *List, allocator: Allocator) void {
+//             for (self.values.items) |node| {
+//                 node.deinit(allocator);
+//             }
+//             self.values.deinit(allocator);
+//         }
 
-        pub fn format(
-            self: *const List,
-            comptime fmt: []const u8,
-            options: std.fmt.FormatOptions,
-            writer: anytype,
-        ) !void {
-            _ = options;
-            _ = fmt;
-            try std.fmt.format(writer, "[ ", .{});
-            for (self.values.items) |node| {
-                try std.fmt.format(writer, "{}, ", .{node});
-            }
-            return std.fmt.format(writer, " ]", .{});
-        }
-    };
+//         pub fn format(
+//             self: *const List,
+//             comptime fmt: []const u8,
+//             options: std.fmt.FormatOptions,
+//             writer: anytype,
+//         ) !void {
+//             _ = options;
+//             _ = fmt;
+//             try std.fmt.format(writer, "[ ", .{});
+//             for (self.values.items) |node| {
+//                 try std.fmt.format(writer, "{}, ", .{node});
+//             }
+//             return std.fmt.format(writer, " ]", .{});
+//         }
+//     };
 
-    pub const Value = struct {
-        base: Node = Node{
-            .tag = Tag.value,
-            .tree = undefined,
-            .start = undefined,
-            .end = undefined,
-        },
-        string_value: std.ArrayListUnmanaged(u8) = .{},
+//     pub const Value = struct {
+//         base: Node = Node{
+//             .tag = Tag.value,
+//             .tree = undefined,
+//             .start = undefined,
+//             .end = undefined,
+//         },
+//         string_value: std.ArrayListUnmanaged(u8) = .{},
 
-        pub const base_tag: Node.Tag = .value;
+//         pub const base_tag: Node.Tag = .value;
 
-        pub fn deinit(self: *Value, allocator: Allocator) void {
-            self.string_value.deinit(allocator);
-        }
+//         pub fn deinit(self: *Value, allocator: Allocator) void {
+//             self.string_value.deinit(allocator);
+//         }
 
-        pub fn format(
-            self: *const Value,
-            comptime fmt: []const u8,
-            options: std.fmt.FormatOptions,
-            writer: anytype,
-        ) !void {
-            _ = options;
-            _ = fmt;
-            const raw = self.base.tree.getRaw(self.base.start, self.base.end);
-            return std.fmt.format(writer, "{s}", .{raw});
-        }
-    };
-};
+//         pub fn format(
+//             self: *const Value,
+//             comptime fmt: []const u8,
+//             options: std.fmt.FormatOptions,
+//             writer: anytype,
+//         ) !void {
+//             _ = options;
+//             _ = fmt;
+//             const raw = self.base.tree.getRaw(self.base.start, self.base.end);
+//             return std.fmt.format(writer, "{s}", .{raw});
+//         }
+//     };
+// };
 
 pub const LineCol = struct {
     line: usize,
@@ -349,35 +328,53 @@ pub const LineCol = struct {
 };
 
 pub const Tree = struct {
-    allocator: Allocator,
     source: []const u8,
-    tokens: []Token,
-    line_cols: std.AutoHashMap(Token.Index, LineCol),
-    docs: std.ArrayListUnmanaged(*Node) = .{},
+    tokens: []const Token,
+    docs: []const Node.Index,
+    nodes: std.MultiArrayList(Node).Slice,
+    extra: []const u32,
+    string_bytes: []const u8,
 
-    pub fn init(allocator: Allocator) Tree {
+    pub fn deinit(self: *Tree, gpa: Allocator) void {
+        gpa.free(self.tokens);
+        gpa.free(self.docs);
+        self.nodes.deinit(gpa);
+        gpa.free(self.extra);
+        gpa.free(self.string_bytes);
+        self.* = undefined;
+    }
+
+    /// Returns the requested data, as well as the new index which is at the start of the
+    /// trailers for the object.
+    pub fn extraData(tree: Tree, comptime T: type, index: usize) struct { data: T, end: usize } {
+        const fields = std.meta.fields(T);
+        var i: usize = index;
+        var result: T = undefined;
+        inline for (fields) |field| {
+            @field(result, field.name) = switch (field.type) {
+                u32 => tree.extra[i],
+                Node.Index => @enumFromInt(tree.extra[i]),
+                i32 => @bitCast(tree.extra[i]),
+                else => @compileError("bad field type: " ++ @typeName(field.type)),
+            };
+            i += 1;
+        }
         return .{
-            .allocator = allocator,
-            .source = undefined,
-            .tokens = undefined,
-            .line_cols = std.AutoHashMap(Token.Index, LineCol).init(allocator),
+            .data = result,
+            .end = i,
         };
     }
 
-    pub fn deinit(self: *Tree) void {
-        self.allocator.free(self.tokens);
-        self.line_cols.deinit();
-        for (self.docs.items) |doc| {
-            doc.deinit(self.allocator);
+    pub fn getDirective(self: Tree, node_index: Node.Index) ?[]const u8 {
+        const tag = self.nodes.items(.tag)[node_index];
+        switch (tag) {
+            .doc => return null,
+            .doc_directive => {
+                const data = self.nodes.items(.data)[node_index];
+                return self.getRaw(data.directive, data.directive);
+            },
+            else => unreachable,
         }
-        self.docs.deinit(self.allocator);
-    }
-
-    pub fn getDirective(self: Tree, doc_index: usize) ?[]const u8 {
-        assert(doc_index < self.docs.items.len);
-        const doc = self.docs.items[doc_index].cast(Node.Doc) orelse return null;
-        const id = doc.directive orelse return null;
-        return self.getRaw(id, id);
     }
 
     pub fn getRaw(self: Tree, start: Token.Index, end: Token.Index) []const u8 {
@@ -451,11 +448,27 @@ pub const Tree = struct {
 
 const Parser = struct {
     allocator: Allocator,
-    tree: *Tree,
     token_it: *TokenIterator,
-    line_cols: *const std.AutoHashMap(Token.Index, LineCol),
+    line_cols: std.AutoHashMapUnmanaged(Token.Index, LineCol) = .{},
+    nodes: std.MultiArrayList(Node) = .{},
+    extra: std.ArrayListUnmanaged(u32) = .{},
+    string_bytes: std.ArrayListUnmanaged(u8) = .{},
 
-    fn value(self: *Parser) ParseError!?*Node {
+    fn deinit(self: *Parser) void {
+        const gpa = self.allocator;
+        self.line_cols.deinit(gpa);
+    }
+
+    fn addString(self: *Parser, string: []const u8) error{OutOfMemory}!String {
+        const gpa = self.allocator;
+        try self.string_bytes.ensureUnusedCapacity(gpa, string.len + 1);
+        const index: u32 = @intCast(self.string_bytes.items.len);
+        self.string_bytes.appendSliceAssumeCapacity(string);
+        self.string_bytes.appendAssumeCapacity(0);
+        return @enumFromInt(index);
+    }
+
+    fn value(self: *Parser) ParseError!Node.OptionalIndex {
         self.eatCommentsAndSpace(&.{});
 
         const pos = self.token_it.pos;
@@ -488,91 +501,97 @@ const Parser = struct {
                 self.token_it.seekBy(-1);
                 return self.list_bracketed();
             },
-            else => return null,
+            else => return .none,
         }
     }
 
-    fn doc(self: *Parser) ParseError!*Node {
-        const node = try self.allocator.create(Node.Doc);
-        errdefer self.allocator.destroy(node);
-        node.* = .{};
-        node.base.tree = self.tree;
-        node.base.start = self.token_it.pos;
+    fn doc(self: *Parser) ParseError!Node.Index {
+        const gpa = self.allocator;
+        const tree = self.tree;
+        const node_index = try tree.nodes.addOne(gpa);
+        const node_start = self.token_it.pos;
 
-        log.debug("(doc) begin {s}@{d}", .{ @tagName(self.tree.getToken(node.base.start).id), node.base.start });
+        log.debug("(doc) begin {s}@{d}", .{ @tagName(tree.getToken(node_start).id), node_start });
 
         // Parse header
-        const explicit_doc: bool = if (self.eatToken(.doc_start, &.{})) |doc_pos| explicit_doc: {
+        const header: union(enum) {
+            directive: Token.Index,
+            explicit,
+            implicit,
+        } = if (self.eatToken(.doc_start, &.{})) |doc_pos| explicit: {
             if (self.getCol(doc_pos) > 0) return error.MalformedYaml;
             if (self.eatToken(.tag, &.{ .new_line, .comment })) |_| {
-                node.directive = try self.expectToken(.literal, &.{ .new_line, .comment });
+                break :explicit .{ .directive = try self.expectToken(.literal, &.{ .new_line, .comment }) };
             }
-            break :explicit_doc true;
-        } else false;
-
-        // Parse value
-        node.value = try self.value();
-        if (node.value == null) {
-            self.token_it.seekBy(-1);
-        }
-        errdefer if (node.value) |val| {
-            val.deinit(self.allocator);
+            break :explicit .explicit;
+        } else .implicit;
+        const directive = switch (header) {
+            .directive => |index| index,
+            else => null,
+        };
+        const is_explicit = switch (header) {
+            .directive, .explicit => true,
+            .implicit => false,
         };
 
+        // Parse value
+        const value_index = try self.value();
+        if (value_index == .none) {
+            self.token_it.seekBy(-1);
+        }
+
         // Parse footer
-        footer: {
+        const node_end: Token.Index = footer: {
             if (self.eatToken(.doc_end, &.{})) |pos| {
-                if (!explicit_doc) return error.UnexpectedToken;
+                if (!is_explicit) return error.UnexpectedToken;
                 if (self.getCol(pos) > 0) return error.MalformedYaml;
-                node.base.end = pos;
-                break :footer;
+                break :footer pos;
             }
             if (self.eatToken(.doc_start, &.{})) |pos| {
-                if (!explicit_doc) return error.UnexpectedToken;
+                if (!is_explicit) return error.UnexpectedToken;
                 if (self.getCol(pos) > 0) return error.MalformedYaml;
                 self.token_it.seekBy(-1);
-                node.base.end = @enumFromInt(@intFromEnum(pos) - 1);
-                break :footer;
+                break :footer @enumFromInt(@intFromEnum(pos) - 1);
             }
             if (self.eatToken(.eof, &.{})) |pos| {
-                node.base.end = @enumFromInt(@intFromEnum(pos) - 1);
-                break :footer;
+                break :footer @enumFromInt(@intFromEnum(pos) - 1);
             }
             return error.UnexpectedToken;
-        }
+        };
 
-        log.debug("(doc) end {s}@{d}", .{ @tagName(self.tree.getToken(node.base.end).id), node.base.end });
+        log.debug("(doc) end {s}@{d}", .{ @tagName(self.tree.getToken(node_end).id), node_end });
 
-        return &node.base;
+        tree.nodes.set(node_index, .{
+            .tag = if (directive == null) .doc else .doc_with_directive,
+            .data = if (directive == null) .{
+                .value = value,
+            } else .{
+                .doc_with_directive = .{
+                    .value = value,
+                    .directive = directive.?,
+                },
+            },
+        });
+
+        return @enumFromInt(node_index);
     }
 
-    fn map(self: *Parser) ParseError!*Node {
-        const node = try self.allocator.create(Node.Map);
-        errdefer self.allocator.destroy(node);
-        node.* = .{};
-        node.base.tree = self.tree;
-        node.base.start = self.token_it.pos;
-        errdefer {
-            for (node.values.items) |entry| {
-                if (entry.value) |val| {
-                    val.deinit(self.allocator);
-                }
-            }
-            node.values.deinit(self.allocator);
-        }
+    fn map(self: *Parser) ParseError!Node.OptionalIndex {
+        const gpa = self.allocator;
+        const tree = self.tree;
+        const node_index = try tree.nodes.addOne(gpa);
+        const node_start = self.token_it.pos;
 
-        log.debug("(map) begin {s}@{d}", .{ @tagName(self.tree.getToken(node.base.start).id), node.base.start });
+        log.debug("(map) begin {s}@{d}", .{ @tagName(self.tree.getToken(node_start).id), node_start });
 
-        const col = self.getCol(node.base.start);
+        const col = self.getCol(node_start);
 
         while (true) {
             self.eatCommentsAndSpace(&.{});
 
             // Parse key
             const key_pos = self.token_it.pos;
-            if (self.getCol(key_pos) < col) {
-                break;
-            }
+            if (self.getCol(key_pos) < col) break;
 
             const key = self.token_it.next() orelse return error.UnexpectedEof;
             switch (key.id) {
@@ -597,12 +616,9 @@ const Parser = struct {
             _ = try self.expectToken(.map_value_ind, &.{ .new_line, .comment });
 
             // Parse value
-            const val = try self.value();
-            errdefer if (val) |v| {
-                v.deinit(self.allocator);
-            };
+            const value_index = try self.value();
 
-            if (val) |v| {
+            if (value_index.unwrap()) |v| {
                 if (self.getCol(v.start) < self.getCol(key_pos)) {
                     return error.MalformedYaml;
                 }
@@ -707,28 +723,24 @@ const Parser = struct {
         return &node.base;
     }
 
-    fn leaf_value(self: *Parser) ParseError!*Node {
-        const node = try self.allocator.create(Node.Value);
-        errdefer self.allocator.destroy(node);
-        node.* = .{ .string_value = .{} };
-        node.base.tree = self.tree;
-        node.base.start = self.token_it.pos;
-        errdefer node.string_value.deinit(self.allocator);
+    fn leaf_value(self: *Parser) ParseError!Node.OptionalIndex {
+        const gpa = self.allocator;
+        const tree = self.tree;
+        const node_index = try tree.nodes.addOne(gpa);
+        const node_start = self.token_it.pos;
 
         // TODO handle multiline strings in new block scope
-        while (self.token_it.next()) |tok| {
+        const string = while (self.token_it.next()) |tok| {
             switch (tok.id) {
                 .single_quoted => {
-                    node.base.end = @enumFromInt(@intFromEnum(self.token_it.pos) - 1);
-                    const raw = self.tree.getRaw(node.base.start, node.base.end);
-                    try self.parseSingleQuoted(node, raw);
-                    break;
+                    const node_end: Token.Index = @enumFromInt(@intFromEnum(self.token_it.pos) - 1);
+                    const raw = self.tree.getRaw(node_start, node_end);
+                    break try self.parseSingleQuoted(raw);
                 },
                 .double_quoted => {
-                    node.base.end = @enumFromInt(@intFromEnum(self.token_it.pos) - 1);
-                    const raw = self.tree.getRaw(node.base.start, node.base.end);
-                    try self.parseDoubleQuoted(node, raw);
-                    break;
+                    const node_end: Token.Index = @enumFromInt(@intFromEnum(self.token_it.pos) - 1);
+                    const raw = self.tree.getRaw(node_start, node_end);
+                    break try self.parseDoubleQuoted(raw);
                 },
                 .literal => {},
                 .space => {
@@ -736,26 +748,29 @@ const Parser = struct {
                     self.eatCommentsAndSpace(&.{});
                     if (self.token_it.peek()) |peek| {
                         if (peek.id != .literal) {
-                            node.base.end = @enumFromInt(trailing);
-                            const raw = self.tree.getRaw(node.base.start, node.base.end);
-                            try node.string_value.appendSlice(self.allocator, raw);
-                            break;
+                            const node_end: Token.Index = @enumFromInt(trailing);
+                            const raw = self.tree.getRaw(node_start, node_end);
+                            break try tree.addString(raw);
                         }
                     }
                 },
                 else => {
                     self.token_it.seekBy(-1);
-                    node.base.end = @enumFromInt(@intFromEnum(self.token_it.pos) - 1);
-                    const raw = self.tree.getRaw(node.base.start, node.base.end);
-                    try node.string_value.appendSlice(self.allocator, raw);
-                    break;
+                    const node_end: Token.Index = @enumFromInt(@intFromEnum(self.token_it.pos) - 1);
+                    const raw = self.tree.getRaw(node_start, node_end);
+                    break try self.addString(raw);
                 },
             }
-        }
+        };
 
-        log.debug("(leaf) {s}", .{self.tree.getRaw(node.base.start, node.base.end)});
+        log.debug("(leaf) {s}", .{string.slice(tree)});
 
-        return &node.base;
+        tree.nodes.set(node_index, .{
+            .tag = .value,
+            .data = .{ .string = string },
+        });
+
+        return @as(Node.Index, @enumFromInt(node_index)).toOptional();
     }
 
     fn eatCommentsAndSpace(self: *Parser, comptime exclusions: []const Token.Id) void {
@@ -807,11 +822,15 @@ const Parser = struct {
         return self.line_cols.get(index).?.col;
     }
 
-    fn parseSingleQuoted(self: *Parser, node: *Node.Value, raw: []const u8) ParseError!void {
-        assert(raw[0] == '\'' and raw[raw.len - 1] == '\'');
+    fn parseSingleQuoted(self: *Parser, raw: []const u8) ParseError!String {
+        const gpa = self.allocator;
+        const tree = self.tree;
 
+        assert(raw[0] == '\'' and raw[raw.len - 1] == '\'');
         const raw_no_quotes = raw[1 .. raw.len - 1];
-        try node.string_value.ensureTotalCapacity(self.allocator, raw_no_quotes.len);
+
+        try tree.string_bytes.ensureUnusedCapacity(gpa, raw_no_quotes.len + 1);
+        const string: String = @enumFromInt(@as(u32, @intCast(tree)));
 
         var state: enum {
             start,
@@ -827,25 +846,33 @@ const Parser = struct {
                         state = .escape;
                     },
                     else => {
-                        node.string_value.appendAssumeCapacity(c);
+                        tree.string_bytes.appendAssumeCapacity(c);
                     },
                 },
                 .escape => switch (c) {
                     '\'' => {
                         state = .start;
-                        node.string_value.appendAssumeCapacity(c);
+                        tree.string_bytes.appendAssumeCapacity(c);
                     },
                     else => return error.InvalidEscapeSequence,
                 },
             }
         }
+
+        tree.string_bytes.appendAssumeCapacity(0);
+
+        return string;
     }
 
-    fn parseDoubleQuoted(self: *Parser, node: *Node.Value, raw: []const u8) ParseError!void {
-        assert(raw[0] == '"' and raw[raw.len - 1] == '"');
+    fn parseDoubleQuoted(self: *Parser, raw: []const u8) ParseError!String {
+        const gpa = self.allocator;
+        const tree = self.tree;
 
+        assert(raw[0] == '"' and raw[raw.len - 1] == '"');
         const raw_no_quotes = raw[1 .. raw.len - 1];
-        try node.string_value.ensureTotalCapacity(self.allocator, raw_no_quotes.len);
+
+        try tree.string_bytes.ensureUnusedCapacity(gpa, raw_no_quotes.len + 1);
+        const string: String = @enumFromInt(@as(u32, @intCast(tree)));
 
         var state: enum {
             start,
@@ -861,26 +888,30 @@ const Parser = struct {
                         state = .escape;
                     },
                     else => {
-                        node.string_value.appendAssumeCapacity(c);
+                        tree.string_bytes.appendAssumeCapacity(c);
                     },
                 },
                 .escape => switch (c) {
                     'n' => {
                         state = .start;
-                        node.string_value.appendAssumeCapacity('\n');
+                        tree.string_bytes.appendAssumeCapacity('\n');
                     },
                     't' => {
                         state = .start;
-                        node.string_value.appendAssumeCapacity('\t');
+                        tree.string_bytes.appendAssumeCapacity('\t');
                     },
                     '"' => {
                         state = .start;
-                        node.string_value.appendAssumeCapacity('"');
+                        tree.string_bytes.appendAssumeCapacity('"');
                     },
                     else => return error.InvalidEscapeSequence,
                 },
             }
         }
+
+        tree.string_bytes.appendAssumeCapacity(0);
+
+        return string;
     }
 };
 
