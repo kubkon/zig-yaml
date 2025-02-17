@@ -7,7 +7,7 @@ const Node = parse.Node;
 const Parser = parse.Parser;
 const Tree = parse.Tree;
 
-fn expect_map_entry_with_string_value(
+fn expectMapEntryWithStringValue(
     tree: Tree,
     entry_data: parse.Map.Entry,
     exp_key: []const u8,
@@ -66,10 +66,10 @@ test "explicit doc" {
     try testing.expectEqual(2, map_data.data.map_len);
 
     var entry_data = tree.extraData(parse.Map.Entry, map_data.end);
-    try expect_map_entry_with_string_value(tree, entry_data.data, "tbd-version", "4");
+    try expectMapEntryWithStringValue(tree, entry_data.data, "tbd-version", "4");
 
     entry_data = tree.extraData(parse.Map.Entry, entry_data.end);
-    try expect_map_entry_with_string_value(tree, entry_data.data, "abc-version", "5");
+    try expectMapEntryWithStringValue(tree, entry_data.data, "abc-version", "5");
 }
 
 test "leaf in quotes" {
@@ -108,13 +108,13 @@ test "leaf in quotes" {
     try testing.expectEqual(3, map_data.data.map_len);
 
     var entry_data = tree.extraData(parse.Map.Entry, map_data.end);
-    try expect_map_entry_with_string_value(tree, entry_data.data, "key1", "no quotes, comma");
+    try expectMapEntryWithStringValue(tree, entry_data.data, "key1", "no quotes, comma");
 
     entry_data = tree.extraData(parse.Map.Entry, entry_data.end);
-    try expect_map_entry_with_string_value(tree, entry_data.data, "key2", "single quoted");
+    try expectMapEntryWithStringValue(tree, entry_data.data, "key2", "single quoted");
 
     entry_data = tree.extraData(parse.Map.Entry, entry_data.end);
-    try expect_map_entry_with_string_value(tree, entry_data.data, "key3", "double quoted");
+    try expectMapEntryWithStringValue(tree, entry_data.data, "key3", "double quoted");
 }
 
 test "nested maps" {
@@ -172,14 +172,14 @@ test "nested maps" {
         try testing.expectEqual(2, nested_map_data.data.map_len);
 
         var nested_entry_data = tree.extraData(parse.Map.Entry, nested_map_data.end);
-        try expect_map_entry_with_string_value(tree, nested_entry_data.data, "key1_1", "value1_1");
+        try expectMapEntryWithStringValue(tree, nested_entry_data.data, "key1_1", "value1_1");
 
         nested_entry_data = tree.extraData(parse.Map.Entry, nested_entry_data.end);
-        try expect_map_entry_with_string_value(tree, nested_entry_data.data, "key1_2", "value1_2");
+        try expectMapEntryWithStringValue(tree, nested_entry_data.data, "key1_2", "value1_2");
     }
 
     entry_data = tree.extraData(parse.Map.Entry, entry_data.end);
-    try expect_map_entry_with_string_value(tree, entry_data.data, "key2", "value2");
+    try expectMapEntryWithStringValue(tree, entry_data.data, "key2", "value2");
 }
 
 // test "map of list of values" {
