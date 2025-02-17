@@ -7,6 +7,25 @@ const Node = parse.Node;
 const Parser = parse.Parser;
 const Tree = parse.Tree;
 
+fn expect_map_entry_with_string_value(
+    tree: Tree,
+    entry_data: parse.Map.Entry,
+    exp_key: []const u8,
+    exp_value: []const u8,
+) !void {
+    const key = tree.getToken(entry_data.key);
+    try testing.expectEqual(key.id, .literal);
+    try testing.expectEqualStrings(exp_key, tree.getRaw(entry_data.key, entry_data.key));
+
+    const maybe_value = entry_data.value;
+    try testing.expect(maybe_value != .none);
+    try testing.expectEqual(.value, tree.nodeTag(maybe_value.unwrap().?));
+
+    const value = maybe_value.unwrap().?;
+    const string = tree.nodeData(value).string.slice(tree);
+    try testing.expectEqualStrings(exp_value, string);
+}
+
 test "explicit doc" {
     const source =
         \\--- !tapi-tbd
@@ -47,34 +66,10 @@ test "explicit doc" {
     try testing.expectEqual(2, map_data.data.map_len);
 
     var entry_data = tree.extraData(parse.Map.Entry, map_data.end);
-    {
-        const key = tree.getToken(entry_data.data.key);
-        try testing.expectEqual(key.id, .literal);
-        try testing.expectEqualStrings("tbd-version", tree.getRaw(entry_data.data.key, entry_data.data.key));
-
-        const maybe_value = entry_data.data.value;
-        try testing.expect(maybe_value != .none);
-        try testing.expectEqual(.value, tree.nodeTag(maybe_value.unwrap().?));
-
-        const value = maybe_value.unwrap().?;
-        const string = tree.nodeData(value).string.slice(tree);
-        try testing.expectEqualStrings("4", string);
-    }
+    try expect_map_entry_with_string_value(tree, entry_data.data, "tbd-version", "4");
 
     entry_data = tree.extraData(parse.Map.Entry, entry_data.end);
-    {
-        const key = tree.getToken(entry_data.data.key);
-        try testing.expectEqual(key.id, .literal);
-        try testing.expectEqualStrings("abc-version", tree.getRaw(entry_data.data.key, entry_data.data.key));
-
-        const maybe_value = entry_data.data.value;
-        try testing.expect(maybe_value != .none);
-        try testing.expectEqual(.value, tree.nodeTag(maybe_value.unwrap().?));
-
-        const value = maybe_value.unwrap().?;
-        const string = tree.nodeData(value).string.slice(tree);
-        try testing.expectEqualStrings("5", string);
-    }
+    try expect_map_entry_with_string_value(tree, entry_data.data, "abc-version", "5");
 }
 
 test "leaf in quotes" {
@@ -113,136 +108,79 @@ test "leaf in quotes" {
     try testing.expectEqual(3, map_data.data.map_len);
 
     var entry_data = tree.extraData(parse.Map.Entry, map_data.end);
+    try expect_map_entry_with_string_value(tree, entry_data.data, "key1", "no quotes, comma");
+
+    entry_data = tree.extraData(parse.Map.Entry, entry_data.end);
+    try expect_map_entry_with_string_value(tree, entry_data.data, "key2", "single quoted");
+
+    entry_data = tree.extraData(parse.Map.Entry, entry_data.end);
+    try expect_map_entry_with_string_value(tree, entry_data.data, "key3", "double quoted");
+}
+
+test "nested maps" {
+    const source =
+        \\key1:
+        \\  key1_1 : value1_1
+        \\  key1_2 : value1_2
+        \\key2   : value2
+    ;
+
+    var parser: Parser = .{ .allocator = testing.allocator, .source = source };
+    defer parser.deinit();
+    try parser.parse();
+
+    var tree = try parser.toOwnedTree();
+    defer tree.deinit(testing.allocator);
+
+    try testing.expectEqual(1, tree.docs.len);
+
+    const doc = tree.docs[0];
+    try testing.expectEqual(.doc, tree.nodeTag(doc));
+
+    const doc_scope = parser.nodes_scopes.get(doc).?;
+    try testing.expectEqual(0, @intFromEnum(doc_scope.start));
+    try testing.expectEqual(tree.tokens.len - 2, @intFromEnum(doc_scope.end));
+
+    const doc_value = tree.nodeData(doc).value;
+    try testing.expect(doc_value != .none);
+    try testing.expectEqual(.map, tree.nodeTag(doc_value.unwrap().?));
+
+    const map = doc_value.unwrap().?;
+    const map_scope = parser.nodes_scopes.get(map).?;
+    try testing.expectEqual(0, @intFromEnum(map_scope.start));
+    try testing.expectEqual(tree.tokens.len - 2, @intFromEnum(map_scope.end));
+
+    const map_data = tree.extraData(parse.Map, tree.nodeData(map).extra);
+    try testing.expectEqual(2, map_data.data.map_len);
+
+    var entry_data = tree.extraData(parse.Map.Entry, map_data.end);
     {
         const key = tree.getToken(entry_data.data.key);
         try testing.expectEqual(key.id, .literal);
         try testing.expectEqualStrings("key1", tree.getRaw(entry_data.data.key, entry_data.data.key));
 
-        const maybe_value = entry_data.data.value;
-        try testing.expect(maybe_value != .none);
-        try testing.expectEqual(.value, tree.nodeTag(maybe_value.unwrap().?));
+        const maybe_nested_map = entry_data.data.value;
+        try testing.expect(maybe_nested_map != .none);
+        try testing.expectEqual(.map, tree.nodeTag(maybe_nested_map.unwrap().?));
 
-        const value = maybe_value.unwrap().?;
-        const string = tree.nodeData(value).string.slice(tree);
-        try testing.expectEqualStrings("no quotes, comma", string);
+        const nested_map = maybe_nested_map.unwrap().?;
+        const nested_map_scope = parser.nodes_scopes.get(nested_map).?;
+        try testing.expectEqual(4, @intFromEnum(nested_map_scope.start));
+        try testing.expectEqual(16, @intFromEnum(nested_map_scope.end));
+
+        const nested_map_data = tree.extraData(parse.Map, tree.nodeData(nested_map).extra);
+        try testing.expectEqual(2, nested_map_data.data.map_len);
+
+        var nested_entry_data = tree.extraData(parse.Map.Entry, nested_map_data.end);
+        try expect_map_entry_with_string_value(tree, nested_entry_data.data, "key1_1", "value1_1");
+
+        nested_entry_data = tree.extraData(parse.Map.Entry, nested_entry_data.end);
+        try expect_map_entry_with_string_value(tree, nested_entry_data.data, "key1_2", "value1_2");
     }
 
     entry_data = tree.extraData(parse.Map.Entry, entry_data.end);
-    {
-        const key = tree.getToken(entry_data.data.key);
-        try testing.expectEqual(key.id, .literal);
-        try testing.expectEqualStrings("key2", tree.getRaw(entry_data.data.key, entry_data.data.key));
-
-        const maybe_value = entry_data.data.value;
-        try testing.expect(maybe_value != .none);
-        try testing.expectEqual(.value, tree.nodeTag(maybe_value.unwrap().?));
-
-        const value = maybe_value.unwrap().?;
-        const string = tree.nodeData(value).string.slice(tree);
-        try testing.expectEqualStrings("single quoted", string);
-    }
-
-    entry_data = tree.extraData(parse.Map.Entry, entry_data.end);
-    {
-        const key = tree.getToken(entry_data.data.key);
-        try testing.expectEqual(key.id, .literal);
-        try testing.expectEqualStrings("key3", tree.getRaw(entry_data.data.key, entry_data.data.key));
-
-        const maybe_value = entry_data.data.value;
-        try testing.expect(maybe_value != .none);
-        try testing.expectEqual(.value, tree.nodeTag(maybe_value.unwrap().?));
-
-        const value = maybe_value.unwrap().?;
-        const string = tree.nodeData(value).string.slice(tree);
-        try testing.expectEqualStrings("double quoted", string);
-    }
+    try expect_map_entry_with_string_value(tree, entry_data.data, "key2", "value2");
 }
-
-// test "nested maps" {
-//     const source =
-//         \\key1:
-//         \\  key1_1 : value1_1
-//         \\  key1_2 : value1_2
-//         \\key2   : value2
-//     ;
-
-//     var tree = Tree.init(testing.allocator);
-//     defer tree.deinit();
-//     try tree.parse(source);
-
-//     try testing.expectEqual(tree.docs.items.len, 1);
-
-//     const doc = tree.docs.items[0].cast(Node.Doc).?;
-//     try testing.expectEqual(@intFromEnum(doc.base.start), 0);
-//     try testing.expectEqual(@intFromEnum(doc.base.end), tree.tokens.len - 2);
-//     try testing.expect(doc.directive == null);
-
-//     try testing.expect(doc.value != null);
-//     try testing.expectEqual(doc.value.?.tag, .map);
-
-//     const map = doc.value.?.cast(Node.Map).?;
-//     try testing.expectEqual(@intFromEnum(map.base.start), 0);
-//     try testing.expectEqual(@intFromEnum(map.base.end), tree.tokens.len - 2);
-//     try testing.expectEqual(map.values.items.len, 2);
-
-//     {
-//         const entry = map.values.items[0];
-
-//         const key = tree.getToken(entry.key);
-//         try testing.expectEqual(key.id, .literal);
-//         try testing.expectEqualStrings("key1", tree.source[key.loc.start..key.loc.end]);
-
-//         const nested_map = entry.value.?.cast(Node.Map).?;
-//         try testing.expectEqual(@intFromEnum(nested_map.base.start), 4);
-//         try testing.expectEqual(@intFromEnum(nested_map.base.end), 16);
-//         try testing.expectEqual(nested_map.values.items.len, 2);
-
-//         {
-//             const nested_entry = nested_map.values.items[0];
-
-//             const nested_key = tree.getToken(nested_entry.key);
-//             try testing.expectEqual(nested_key.id, .literal);
-//             try testing.expectEqualStrings("key1_1", tree.source[nested_key.loc.start..nested_key.loc.end]);
-
-//             const nested_value = nested_entry.value.?.cast(Node.Value).?;
-//             const nested_value_tok = tree.getToken(nested_value.base.start);
-//             try testing.expectEqual(nested_value_tok.id, .literal);
-//             try testing.expectEqualStrings(
-//                 "value1_1",
-//                 tree.source[nested_value_tok.loc.start..nested_value_tok.loc.end],
-//             );
-//         }
-
-//         {
-//             const nested_entry = nested_map.values.items[1];
-
-//             const nested_key = tree.getToken(nested_entry.key);
-//             try testing.expectEqual(nested_key.id, .literal);
-//             try testing.expectEqualStrings("key1_2", tree.source[nested_key.loc.start..nested_key.loc.end]);
-
-//             const nested_value = nested_entry.value.?.cast(Node.Value).?;
-//             const nested_value_tok = tree.getToken(nested_value.base.start);
-//             try testing.expectEqual(nested_value_tok.id, .literal);
-//             try testing.expectEqualStrings(
-//                 "value1_2",
-//                 tree.source[nested_value_tok.loc.start..nested_value_tok.loc.end],
-//             );
-//         }
-//     }
-
-//     {
-//         const entry = map.values.items[1];
-
-//         const key = tree.getToken(entry.key);
-//         try testing.expectEqual(key.id, .literal);
-//         try testing.expectEqualStrings("key2", tree.source[key.loc.start..key.loc.end]);
-
-//         const value = entry.value.?.cast(Node.Value).?;
-//         const value_tok = tree.getToken(value.base.start);
-//         try testing.expectEqual(value_tok.id, .literal);
-//         try testing.expectEqualStrings("value2", tree.source[value_tok.loc.start..value_tok.loc.end]);
-//     }
-// }
 
 // test "map of list of values" {
 //     const source =
