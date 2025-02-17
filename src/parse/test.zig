@@ -77,47 +77,86 @@ test "explicit doc" {
     }
 }
 
-// test "leaf in quotes" {
-//     const source =
-//         \\key1: no quotes, comma
-//         \\key2: 'single quoted'
-//         \\key3: "double quoted"
-//     ;
+test "leaf in quotes" {
+    const source =
+        \\key1: no quotes, comma
+        \\key2: 'single quoted'
+        \\key3: "double quoted"
+    ;
 
-//     var tree = Tree.init(testing.allocator);
-//     defer tree.deinit();
-//     try tree.parse(source);
+    var parser: Parser = .{ .allocator = testing.allocator, .source = source };
+    defer parser.deinit();
+    try parser.parse();
 
-//     try testing.expectEqual(tree.docs.items.len, 1);
+    var tree = try parser.toOwnedTree();
+    defer tree.deinit(testing.allocator);
 
-//     const doc = tree.docs.items[0].cast(Node.Doc).?;
-//     try testing.expectEqual(@intFromEnum(doc.base.start), 0);
-//     try testing.expectEqual(@intFromEnum(doc.base.end), tree.tokens.len - 2);
-//     try testing.expect(doc.directive == null);
+    try testing.expectEqual(1, tree.docs.len);
 
-//     try testing.expect(doc.value != null);
-//     try testing.expectEqual(doc.value.?.tag, .map);
+    const doc = tree.docs[0];
+    try testing.expectEqual(.doc, tree.nodeTag(doc));
 
-//     const map = doc.value.?.cast(Node.Map).?;
-//     try testing.expectEqual(@intFromEnum(map.base.start), 0);
-//     try testing.expectEqual(@intFromEnum(map.base.end), tree.tokens.len - 2);
-//     try testing.expectEqual(map.values.items.len, 3);
+    const doc_scope = parser.nodes_scopes.get(doc).?;
+    try testing.expectEqual(0, @intFromEnum(doc_scope.start));
+    try testing.expectEqual(tree.tokens.len - 2, @intFromEnum(doc_scope.end));
 
-//     {
-//         const entry = map.values.items[0];
+    const doc_value = tree.nodeData(doc).value;
+    try testing.expect(doc_value != .none);
+    try testing.expectEqual(.map, tree.nodeTag(doc_value.unwrap().?));
 
-//         const key = tree.getToken(entry.key);
-//         try testing.expectEqual(key.id, .literal);
-//         try testing.expectEqualStrings("key1", tree.source[key.loc.start..key.loc.end]);
+    const map = doc_value.unwrap().?;
+    const map_scope = parser.nodes_scopes.get(map).?;
+    try testing.expectEqual(0, @intFromEnum(map_scope.start));
+    try testing.expectEqual(tree.tokens.len - 2, @intFromEnum(map_scope.end));
 
-//         const value = entry.value.?.cast(Node.Value).?;
-//         const start = tree.getToken(value.base.start);
-//         const end = tree.getToken(value.base.end);
-//         try testing.expectEqual(start.id, .literal);
-//         try testing.expectEqual(end.id, .literal);
-//         try testing.expectEqualStrings("no quotes, comma", tree.source[start.loc.start..end.loc.end]);
-//     }
-// }
+    const map_data = tree.extraData(parse.Map, tree.nodeData(map).extra);
+    try testing.expectEqual(3, map_data.data.map_len);
+
+    var entry_data = tree.extraData(parse.Map.Entry, map_data.end);
+    {
+        const key = tree.getToken(entry_data.data.key);
+        try testing.expectEqual(key.id, .literal);
+        try testing.expectEqualStrings("key1", tree.getRaw(entry_data.data.key, entry_data.data.key));
+
+        const maybe_value = entry_data.data.value;
+        try testing.expect(maybe_value != .none);
+        try testing.expectEqual(.value, tree.nodeTag(maybe_value.unwrap().?));
+
+        const value = maybe_value.unwrap().?;
+        const string = tree.nodeData(value).string.slice(tree);
+        try testing.expectEqualStrings("no quotes, comma", string);
+    }
+
+    entry_data = tree.extraData(parse.Map.Entry, entry_data.end);
+    {
+        const key = tree.getToken(entry_data.data.key);
+        try testing.expectEqual(key.id, .literal);
+        try testing.expectEqualStrings("key2", tree.getRaw(entry_data.data.key, entry_data.data.key));
+
+        const maybe_value = entry_data.data.value;
+        try testing.expect(maybe_value != .none);
+        try testing.expectEqual(.value, tree.nodeTag(maybe_value.unwrap().?));
+
+        const value = maybe_value.unwrap().?;
+        const string = tree.nodeData(value).string.slice(tree);
+        try testing.expectEqualStrings("single quoted", string);
+    }
+
+    entry_data = tree.extraData(parse.Map.Entry, entry_data.end);
+    {
+        const key = tree.getToken(entry_data.data.key);
+        try testing.expectEqual(key.id, .literal);
+        try testing.expectEqualStrings("key3", tree.getRaw(entry_data.data.key, entry_data.data.key));
+
+        const maybe_value = entry_data.data.value;
+        try testing.expect(maybe_value != .none);
+        try testing.expectEqual(.value, tree.nodeTag(maybe_value.unwrap().?));
+
+        const value = maybe_value.unwrap().?;
+        const string = tree.nodeData(value).string.slice(tree);
+        try testing.expectEqualStrings("double quoted", string);
+    }
+}
 
 // test "nested maps" {
 //     const source =
