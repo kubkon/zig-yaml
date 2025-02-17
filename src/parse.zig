@@ -118,214 +118,6 @@ pub const ParseError = error{
     Unhandled,
 } || Allocator.Error;
 
-// pub const Node = struct {
-//     tag: Tag,
-//     tree: *const Tree,
-//     start: Token.Index,
-//     end: Token.Index,
-
-//     pub const Tag = enum {
-//         doc,
-//         map,
-//         list,
-//         value,
-//     };
-
-//     pub fn cast(self: *const Node, comptime T: type) ?*const T {
-//         if (self.tag != T.base_tag) {
-//             return null;
-//         }
-//         return @fieldParentPtr("base", self);
-//     }
-
-//     pub fn deinit(self: *Node, allocator: Allocator) void {
-//         switch (self.tag) {
-//             .doc => {
-//                 const parent: *Node.Doc = @fieldParentPtr("base", self);
-//                 parent.deinit(allocator);
-//                 allocator.destroy(parent);
-//             },
-//             .map => {
-//                 const parent: *Node.Map = @fieldParentPtr("base", self);
-//                 parent.deinit(allocator);
-//                 allocator.destroy(parent);
-//             },
-//             .list => {
-//                 const parent: *Node.List = @fieldParentPtr("base", self);
-//                 parent.deinit(allocator);
-//                 allocator.destroy(parent);
-//             },
-//             .value => {
-//                 const parent: *Node.Value = @fieldParentPtr("base", self);
-//                 parent.deinit(allocator);
-//                 allocator.destroy(parent);
-//             },
-//         }
-//     }
-
-//     pub fn format(
-//         self: *const Node,
-//         comptime fmt: []const u8,
-//         options: std.fmt.FormatOptions,
-//         writer: anytype,
-//     ) !void {
-//         return switch (self.tag) {
-//             .doc => @as(*const Node.Doc, @fieldParentPtr("base", self)).format(fmt, options, writer),
-//             .map => @as(*const Node.Map, @fieldParentPtr("base", self)).format(fmt, options, writer),
-//             .list => @as(*const Node.List, @fieldParentPtr("base", self)).format(fmt, options, writer),
-//             .value => @as(*const Node.Value, @fieldParentPtr("base", self)).format(fmt, options, writer),
-//         };
-//     }
-
-//     pub const Doc = struct {
-//         base: Node = Node{
-//             .tag = Tag.doc,
-//             .tree = undefined,
-//             .start = undefined,
-//             .end = undefined,
-//         },
-//         directive: ?Token.Index = null,
-//         value: ?*Node = null,
-
-//         pub const base_tag: Node.Tag = .doc;
-
-//         pub fn deinit(self: *Doc, allocator: Allocator) void {
-//             if (self.value) |node| {
-//                 node.deinit(allocator);
-//             }
-//         }
-
-//         pub fn format(
-//             self: *const Doc,
-//             comptime fmt: []const u8,
-//             options: std.fmt.FormatOptions,
-//             writer: anytype,
-//         ) !void {
-//             _ = options;
-//             _ = fmt;
-//             if (self.directive) |id| {
-//                 try std.fmt.format(writer, "{{ ", .{});
-//                 const directive = self.base.tree.getRaw(id, id);
-//                 try std.fmt.format(writer, ".directive = {s}, ", .{directive});
-//             }
-//             if (self.value) |node| {
-//                 try std.fmt.format(writer, "{}", .{node});
-//             }
-//             if (self.directive != null) {
-//                 try std.fmt.format(writer, " }}", .{});
-//             }
-//         }
-//     };
-
-//     pub const Map = struct {
-//         base: Node = Node{
-//             .tag = Tag.map,
-//             .tree = undefined,
-//             .start = undefined,
-//             .end = undefined,
-//         },
-//         values: std.ArrayListUnmanaged(Entry) = .{},
-
-//         pub const base_tag: Node.Tag = .map;
-
-//         pub const Entry = struct {
-//             key: Token.Index,
-//             value: ?*Node,
-//         };
-
-//         pub fn deinit(self: *Map, allocator: Allocator) void {
-//             for (self.values.items) |entry| {
-//                 if (entry.value) |value| {
-//                     value.deinit(allocator);
-//                 }
-//             }
-//             self.values.deinit(allocator);
-//         }
-
-//         pub fn format(
-//             self: *const Map,
-//             comptime fmt: []const u8,
-//             options: std.fmt.FormatOptions,
-//             writer: anytype,
-//         ) !void {
-//             _ = options;
-//             _ = fmt;
-//             try std.fmt.format(writer, "{{ ", .{});
-//             for (self.values.items) |entry| {
-//                 const key = self.base.tree.getRaw(entry.key, entry.key);
-//                 if (entry.value) |value| {
-//                     try std.fmt.format(writer, "{s} => {}, ", .{ key, value });
-//                 } else {
-//                     try std.fmt.format(writer, "{s} => null, ", .{key});
-//                 }
-//             }
-//             return std.fmt.format(writer, " }}", .{});
-//         }
-//     };
-
-//     pub const List = struct {
-//         base: Node = Node{
-//             .tag = Tag.list,
-//             .tree = undefined,
-//             .start = undefined,
-//             .end = undefined,
-//         },
-//         values: std.ArrayListUnmanaged(*Node) = .{},
-
-//         pub const base_tag: Node.Tag = .list;
-
-//         pub fn deinit(self: *List, allocator: Allocator) void {
-//             for (self.values.items) |node| {
-//                 node.deinit(allocator);
-//             }
-//             self.values.deinit(allocator);
-//         }
-
-//         pub fn format(
-//             self: *const List,
-//             comptime fmt: []const u8,
-//             options: std.fmt.FormatOptions,
-//             writer: anytype,
-//         ) !void {
-//             _ = options;
-//             _ = fmt;
-//             try std.fmt.format(writer, "[ ", .{});
-//             for (self.values.items) |node| {
-//                 try std.fmt.format(writer, "{}, ", .{node});
-//             }
-//             return std.fmt.format(writer, " ]", .{});
-//         }
-//     };
-
-//     pub const Value = struct {
-//         base: Node = Node{
-//             .tag = Tag.value,
-//             .tree = undefined,
-//             .start = undefined,
-//             .end = undefined,
-//         },
-//         string_value: std.ArrayListUnmanaged(u8) = .{},
-
-//         pub const base_tag: Node.Tag = .value;
-
-//         pub fn deinit(self: *Value, allocator: Allocator) void {
-//             self.string_value.deinit(allocator);
-//         }
-
-//         pub fn format(
-//             self: *const Value,
-//             comptime fmt: []const u8,
-//             options: std.fmt.FormatOptions,
-//             writer: anytype,
-//         ) !void {
-//             _ = options;
-//             _ = fmt;
-//             const raw = self.base.tree.getRaw(self.base.start, self.base.end);
-//             return std.fmt.format(writer, "{s}", .{raw});
-//         }
-//     };
-// };
-
 pub const LineCol = struct {
     line: usize,
     col: usize,
@@ -424,6 +216,8 @@ pub const Parser = struct {
         self.extra.deinit(gpa);
         self.string_bytes.deinit(gpa);
         self.line_cols.deinit(gpa);
+        gpa.free(self.token_it.buffer);
+        self.* = undefined;
     }
 
     pub fn parse(self: *Parser) ParseError!void {
@@ -464,7 +258,7 @@ pub const Parser = struct {
             self.eatCommentsAndSpace(&.{});
             const token = self.token_it.next() orelse break;
 
-            std.debug.print("(main) next {s}@{d}\n", .{ @tagName(token.id), @intFromEnum(self.token_it.pos) - 1 });
+            log.debug("(main) next {s}@{d}", .{ @tagName(token.id), @intFromEnum(self.token_it.pos) - 1 });
 
             switch (token.id) {
                 .eof => break,
@@ -479,9 +273,12 @@ pub const Parser = struct {
 
     pub fn toOwnedTree(self: *Parser) Allocator.Error!Tree {
         const gpa = self.allocator;
+        const tokens = try gpa.alloc(Token, self.token_it.buffer.len);
+        @memcpy(tokens, self.token_it.buffer);
+
         return .{
             .source = self.source,
-            .tokens = self.token_it.buffer,
+            .tokens = tokens,
             .docs = try self.docs.toOwnedSlice(gpa),
             .nodes = self.nodes.toOwnedSlice(),
             .extra = try self.extra.toOwnedSlice(gpa),
