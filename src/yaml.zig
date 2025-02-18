@@ -207,7 +207,7 @@ pub const Value = union(enum) {
                 var extra_end = list.end;
                 for (0..list.data.list_len) |_| {
                     const elem = tree.extraData(parse_util.List.Entry, extra_end);
-                    extra_end = list.end;
+                    extra_end = elem.end;
 
                     const value = try Value.fromNode(arena, tree, elem.data.value);
                     out_list.appendAssumeCapacity(value);
@@ -562,5 +562,5 @@ pub fn stringify(allocator: Allocator, input: anytype, writer: anytype) Stringif
 test {
     std.testing.refAllDecls(Tokenizer);
     std.testing.refAllDecls(parse_util);
-    // _ = @import("yaml/test.zig");
+    _ = @import("yaml/test.zig");
 }
