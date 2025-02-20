@@ -99,13 +99,17 @@ pub const List = struct {
     };
 };
 
-/// Index into string_bytes.
-pub const String = enum(u32) {
-    _,
+/// Index and length into string_bytes.
+pub const String = struct {
+    index: Index,
+    len: u32,
 
-    pub fn slice(index: String, tree: Tree) [:0]const u8 {
-        const start_slice = tree.string_bytes[@intFromEnum(index)..];
-        return start_slice[0..mem.indexOfScalar(u8, start_slice, 0).? :0];
+    pub const Index = enum(u32) {
+        _,
+    };
+
+    pub fn slice(str: String, tree: Tree) []const u8 {
+        return tree.string_bytes[@intFromEnum(str.index)..][0..str.len];
     }
 };
 
@@ -288,11 +292,10 @@ pub const Parser = struct {
 
     fn addString(self: *Parser, string: []const u8) Allocator.Error!String {
         const gpa = self.allocator;
-        try self.string_bytes.ensureUnusedCapacity(gpa, string.len + 1);
         const index: u32 = @intCast(self.string_bytes.items.len);
+        try self.string_bytes.ensureUnusedCapacity(gpa, string.len);
         self.string_bytes.appendSliceAssumeCapacity(string);
-        self.string_bytes.appendAssumeCapacity(0);
-        return @enumFromInt(index);
+        return .{ .index = @enumFromInt(index), .len = @intCast(string.len) };
     }
 
     fn addExtra(self: *Parser, extra: anytype) Allocator.Error!u32 {
@@ -645,6 +648,7 @@ pub const Parser = struct {
                 .single_quoted => {
                     const node_end: Token.Index = @enumFromInt(@intFromEnum(self.token_it.pos) - 1);
                     const raw = self.getRaw(node_start, node_end);
+                    assert(raw.len > 0);
                     const string = try self.parseSingleQuoted(raw);
                     result = .{ node_end, string };
                     break;
@@ -652,6 +656,7 @@ pub const Parser = struct {
                 .double_quoted => {
                     const node_end: Token.Index = @enumFromInt(@intFromEnum(self.token_it.pos) - 1);
                     const raw = self.getRaw(node_start, node_end);
+                    assert(raw.len > 0);
                     const string = try self.parseDoubleQuoted(raw);
                     result = .{ node_end, string };
                     break;
@@ -664,6 +669,7 @@ pub const Parser = struct {
                         if (peek.id != .literal) {
                             const node_end: Token.Index = @enumFromInt(trailing);
                             const raw = self.getRaw(node_start, node_end);
+                            assert(raw.len > 0);
                             const string = try self.addString(raw);
                             result = .{ node_end, string };
                             break;
@@ -674,6 +680,7 @@ pub const Parser = struct {
                     self.token_it.seekBy(-1);
                     const node_end: Token.Index = @enumFromInt(@intFromEnum(self.token_it.pos) - 1);
                     const raw = self.getRaw(node_start, node_end);
+                    assert(raw.len > 0);
                     const string = try self.addString(raw);
                     result = .{ node_end, string };
                     break;
@@ -752,13 +759,17 @@ pub const Parser = struct {
         assert(raw[0] == '\'' and raw[raw.len - 1] == '\'');
         const raw_no_quotes = raw[1 .. raw.len - 1];
 
-        try self.string_bytes.ensureUnusedCapacity(gpa, raw_no_quotes.len + 1);
-        const string: String = @enumFromInt(@as(u32, @intCast(self.string_bytes.items.len)));
+        try self.string_bytes.ensureUnusedCapacity(gpa, raw_no_quotes.len);
+        var string: String = .{
+            .index = @enumFromInt(@as(u32, @intCast(self.string_bytes.items.len))),
+            .len = 0,
+        };
 
         var state: enum {
             start,
             escape,
         } = .start;
+
         var index: usize = 0;
 
         while (index < raw_no_quotes.len) : (index += 1) {
@@ -770,19 +781,19 @@ pub const Parser = struct {
                     },
                     else => {
                         self.string_bytes.appendAssumeCapacity(c);
+                        string.len += 1;
                     },
                 },
                 .escape => switch (c) {
                     '\'' => {
                         state = .start;
                         self.string_bytes.appendAssumeCapacity(c);
+                        string.len += 1;
                     },
                     else => return error.InvalidEscapeSequence,
                 },
             }
         }
-
-        self.string_bytes.appendAssumeCapacity(0);
 
         return string;
     }
@@ -793,8 +804,11 @@ pub const Parser = struct {
         assert(raw[0] == '"' and raw[raw.len - 1] == '"');
         const raw_no_quotes = raw[1 .. raw.len - 1];
 
-        try self.string_bytes.ensureUnusedCapacity(gpa, raw_no_quotes.len + 1);
-        const string: String = @enumFromInt(@as(u32, @intCast(self.string_bytes.items.len)));
+        try self.string_bytes.ensureUnusedCapacity(gpa, raw_no_quotes.len);
+        var string: String = .{
+            .index = @enumFromInt(@as(u32, @intCast(self.string_bytes.items.len))),
+            .len = 0,
+        };
 
         var state: enum {
             start,
@@ -802,6 +816,7 @@ pub const Parser = struct {
         } = .start;
 
         var index: usize = 0;
+
         while (index < raw_no_quotes.len) : (index += 1) {
             const c = raw_no_quotes[index];
             switch (state) {
@@ -811,27 +826,29 @@ pub const Parser = struct {
                     },
                     else => {
                         self.string_bytes.appendAssumeCapacity(c);
+                        string.len += 1;
                     },
                 },
                 .escape => switch (c) {
                     'n' => {
                         state = .start;
                         self.string_bytes.appendAssumeCapacity('\n');
+                        string.len += 1;
                     },
                     't' => {
                         state = .start;
                         self.string_bytes.appendAssumeCapacity('\t');
+                        string.len += 1;
                     },
                     '"' => {
                         state = .start;
                         self.string_bytes.appendAssumeCapacity('"');
+                        string.len += 1;
                     },
                     else => return error.InvalidEscapeSequence,
                 },
             }
         }
-
-        self.string_bytes.appendAssumeCapacity(0);
 
         return string;
     }
