@@ -343,11 +343,13 @@ pub const Value = union(enum) {
 };
 
 pub const Yaml = struct {
+    gpa: Allocator,
     arena: ArenaAllocator,
     docs: std.ArrayList(Value),
     tree: Tree = undefined,
 
     pub fn deinit(self: *Yaml) void {
+        self.tree.deinit(self.gpa);
         self.arena.deinit();
     }
 
@@ -355,12 +357,12 @@ pub const Yaml = struct {
         var arena = ArenaAllocator.init(allocator);
         errdefer arena.deinit();
 
-        var parser: Parser = .{ .allocator = arena.allocator(), .source = source };
+        var parser: Parser = .{ .allocator = allocator, .source = source };
         defer parser.deinit();
         try parser.parse();
 
         var tree = try parser.toOwnedTree();
-        errdefer tree.deinit(arena.allocator());
+        errdefer tree.deinit(allocator);
 
         var docs = std.ArrayList(Value).init(arena.allocator());
         try docs.ensureTotalCapacityPrecise(tree.docs.len);
@@ -371,6 +373,7 @@ pub const Yaml = struct {
         }
 
         return Yaml{
+            .gpa = allocator,
             .arena = arena,
             .tree = tree,
             .docs = docs,
