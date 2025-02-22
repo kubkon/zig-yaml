@@ -46,8 +46,13 @@ pub const Node = struct {
         /// Payload is extra.
         list_many,
 
-        /// Payload is string.
+        /// String that didn't require any processing.
+        /// Value is encoded directly as scope.
+        /// Payload is unused.
         value,
+
+        /// Payload is string.
+        string_value,
     };
 
     pub const Scope = struct {
@@ -709,24 +714,43 @@ pub const Parser = struct {
         const node_start = self.token_it.pos;
 
         // TODO handle multiline strings in new block scope
-        var result: ?struct { Token.Index, String } = null;
         while (self.token_it.next()) |tok| {
             switch (tok.id) {
                 .single_quoted => {
                     const node_end: Token.Index = @enumFromInt(@intFromEnum(self.token_it.pos) - 1);
+                    log.debug("(leaf) {s}", .{self.getRaw(node_start, node_end)});
                     const raw = self.getRaw(node_start, node_end);
                     assert(raw.len > 0);
                     const string = try self.parseSingleQuoted(raw);
-                    result = .{ node_end, string };
-                    break;
+
+                    self.nodes.set(node_index, .{
+                        .tag = .string_value,
+                        .scope = .{
+                            .start = node_start,
+                            .end = node_end,
+                        },
+                        .data = .{ .string = string },
+                    });
+
+                    return @as(Node.Index, @enumFromInt(node_index)).toOptional();
                 },
                 .double_quoted => {
                     const node_end: Token.Index = @enumFromInt(@intFromEnum(self.token_it.pos) - 1);
+                    log.debug("(leaf) {s}", .{self.getRaw(node_start, node_end)});
                     const raw = self.getRaw(node_start, node_end);
                     assert(raw.len > 0);
                     const string = try self.parseDoubleQuoted(raw);
-                    result = .{ node_end, string };
-                    break;
+
+                    self.nodes.set(node_index, .{
+                        .tag = .string_value,
+                        .scope = .{
+                            .start = node_start,
+                            .end = node_end,
+                        },
+                        .data = .{ .string = string },
+                    });
+
+                    return @as(Node.Index, @enumFromInt(node_index)).toOptional();
                 },
                 .literal => {},
                 .space => {
@@ -735,39 +759,37 @@ pub const Parser = struct {
                     if (self.token_it.peek()) |peek| {
                         if (peek.id != .literal) {
                             const node_end: Token.Index = @enumFromInt(trailing);
-                            const raw = self.getRaw(node_start, node_end);
-                            assert(raw.len > 0);
-                            const string = try self.addString(raw);
-                            result = .{ node_end, string };
-                            break;
+                            log.debug("(leaf) {s}", .{self.getRaw(node_start, node_end)});
+                            self.nodes.set(node_index, .{
+                                .tag = .value,
+                                .scope = .{
+                                    .start = node_start,
+                                    .end = node_end,
+                                },
+                                .data = undefined,
+                            });
+                            return @as(Node.Index, @enumFromInt(node_index)).toOptional();
                         }
                     }
                 },
                 else => {
                     self.token_it.seekBy(-1);
                     const node_end: Token.Index = @enumFromInt(@intFromEnum(self.token_it.pos) - 1);
-                    const raw = self.getRaw(node_start, node_end);
-                    assert(raw.len > 0);
-                    const string = try self.addString(raw);
-                    result = .{ node_end, string };
-                    break;
+                    log.debug("(leaf) {s}", .{self.getRaw(node_start, node_end)});
+                    self.nodes.set(node_index, .{
+                        .tag = .value,
+                        .scope = .{
+                            .start = node_start,
+                            .end = node_end,
+                        },
+                        .data = undefined,
+                    });
+                    return @as(Node.Index, @enumFromInt(node_index)).toOptional();
                 },
             }
         }
-        const node_end, const string = result orelse return error.MalformedYaml;
 
-        log.debug("(leaf) {s}", .{self.getRaw(node_start, node_end)});
-
-        self.nodes.set(node_index, .{
-            .tag = .value,
-            .scope = .{
-                .start = node_start,
-                .end = node_end,
-            },
-            .data = .{ .string = string },
-        });
-
-        return @as(Node.Index, @enumFromInt(node_index)).toOptional();
+        return error.MalformedYaml;
     }
 
     fn eatCommentsAndSpace(self: *Parser, comptime exclusions: []const Token.Id) void {

@@ -263,9 +263,18 @@ pub const Value = union(enum) {
 
                 return Value{ .list = try out_list.toOwnedSlice() };
             },
-            .value => {
-                const string = tree.nodeData(node_index).string;
-                const raw = string.slice(tree);
+            .value, .string_value => {
+                const raw = raw: switch (tag) {
+                    .value => {
+                        const scope = tree.nodeScope(node_index);
+                        break :raw tree.getRaw(scope.start, scope.end);
+                    },
+                    .string_value => {
+                        const string = tree.nodeData(node_index).string;
+                        break :raw string.slice(tree);
+                    },
+                    else => unreachable,
+                };
 
                 try_int: {
                     const int = std.fmt.parseInt(i64, raw, 0) catch break :try_int;

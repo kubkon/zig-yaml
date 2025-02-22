@@ -23,6 +23,21 @@ fn expectValueMapEntry(tree: Tree, entry_data: parse.Map.Entry, exp_key: []const
     try testing.expectEqual(.value, tree.nodeTag(maybe_value.unwrap().?));
 
     const value = maybe_value.unwrap().?;
+    const scope = tree.nodeScope(value);
+    const string = tree.getRaw(scope.start, scope.end);
+    try testing.expectEqualStrings(exp_value, string);
+}
+
+fn expectStringValueMapEntry(tree: Tree, entry_data: parse.Map.Entry, exp_key: []const u8, exp_value: []const u8) !void {
+    const key = tree.getToken(entry_data.key);
+    try testing.expectEqual(key.id, .literal);
+    try testing.expectEqualStrings(exp_key, tree.getRaw(entry_data.key, entry_data.key));
+
+    const maybe_value = entry_data.maybe_node;
+    try testing.expect(maybe_value != .none);
+    try testing.expectEqual(.string_value, tree.nodeTag(maybe_value.unwrap().?));
+
+    const value = maybe_value.unwrap().?;
     const string = tree.nodeData(value).string.slice(tree);
     try testing.expectEqualStrings(exp_value, string);
 }
@@ -31,7 +46,8 @@ fn expectValueListEntry(tree: Tree, entry_data: parse.List.Entry, exp_value: []c
     const value = entry_data.node;
     try testing.expectEqual(.value, tree.nodeTag(value));
 
-    const string = tree.nodeData(value).string.slice(tree);
+    const scope = tree.nodeScope(value);
+    const string = tree.getRaw(scope.start, scope.end);
     try testing.expectEqualStrings(exp_value, string);
 }
 
@@ -125,10 +141,10 @@ test "leaf in quotes" {
     try expectValueMapEntry(tree, entry_data.data, "key1", "no quotes, comma");
 
     entry_data = tree.extraData(parse.Map.Entry, entry_data.end);
-    try expectValueMapEntry(tree, entry_data.data, "key2", "single quoted");
+    try expectStringValueMapEntry(tree, entry_data.data, "key2", "single quoted");
 
     entry_data = tree.extraData(parse.Map.Entry, entry_data.end);
-    try expectValueMapEntry(tree, entry_data.data, "key3", "double quoted");
+    try expectStringValueMapEntry(tree, entry_data.data, "key3", "double quoted");
 }
 
 test "nested maps" {
