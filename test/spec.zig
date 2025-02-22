@@ -567,13 +567,13 @@ const skip_test_template =
 
 const no_output_template =
     \\    var yaml = try loadFromFile("{s}");
-    \\    defer yaml.deinit();
+    \\    defer yaml.deinit(alloc);
     \\
 ;
 
 const expect_file_template =
     \\    var yaml = try loadFromFile("{s}");
-    \\    defer yaml.deinit();
+    \\    defer yaml.deinit(alloc);
     \\
     \\    const expected = try loadFileString("{s}");
     \\    defer alloc.free(expected);
@@ -588,7 +588,7 @@ const expect_file_template =
 
 const expect_err_template =
     \\    var yaml = loadFromFile("{s}") catch return;
-    \\    defer yaml.deinit();
+    \\    defer yaml.deinit(alloc);
     \\    return error.UnexpectedSuccess;
     \\
 ;
