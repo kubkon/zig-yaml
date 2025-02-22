@@ -125,7 +125,7 @@ fn make(step: *Step, make_options: Step.MakeOptions) !void {
     const writer = output.writer();
     try writer.writeAll(preamble);
 
-    while (testcases.popOrNull()) |kv| {
+    while (testcases.pop()) |kv| {
         emitTest(arena, &output, kv.value) catch |err| switch (err) {
             error.OutOfMemory => @panic("OOM"),
             else => |e| return e,
