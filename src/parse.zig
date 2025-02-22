@@ -15,31 +15,58 @@ pub const Node = struct {
 
     pub const Tag = enum(u8) {
         /// Comprises an index into another Node.
-        /// Payload is value.
+        /// Payload is maybe_value.
         doc,
 
         /// Doc with directive.
         /// Payload is doc_with_directive.
         doc_with_directive,
 
+        /// Map with a single key-value pair.
+        /// Payload is map.
+        map_single,
+
         /// Comprises an index into extras where payload is Map.
         /// Payload is extra.
-        map,
+        map_many,
+
+        /// Empty list has no payload.
+        list_empty,
+
+        /// List with one element.
+        /// Payload is value.
+        list_one,
+
+        /// List with two elements.
+        /// Payload is list.
+        list_two,
 
         /// Comprises an index into extras where payload is List.
         /// Payload is extra.
-        list,
+        list_many,
 
         /// Payload is string.
         value,
     };
 
     pub const Data = union {
-        value: OptionalIndex,
+        value: Index,
+
+        maybe_value: OptionalIndex,
 
         doc_with_directive: struct {
             value: OptionalIndex,
             directive: Token.Index,
+        },
+
+        map: struct {
+            key: Token.Index,
+            value: OptionalIndex,
+        },
+
+        list: struct {
+            el1: Index,
+            el2: Index,
         },
 
         string: String,
@@ -340,12 +367,12 @@ pub const Parser = struct {
             } else {
                 // leaf value
                 self.token_it.seekTo(pos);
-                return self.leaf_value();
+                return self.leafValue();
             },
             .single_quoted, .double_quoted => {
                 // leaf value
                 self.token_it.seekBy(-1);
-                return self.leaf_value();
+                return self.leafValue();
             },
             .seq_item_ind => {
                 // list
@@ -355,7 +382,7 @@ pub const Parser = struct {
             .flow_seq_start => {
                 // list
                 self.token_it.seekBy(-1);
-                return self.list_bracketed();
+                return self.listBracketed();
             },
             else => return .none,
         }
@@ -419,7 +446,7 @@ pub const Parser = struct {
         self.nodes.set(node_index, .{
             .tag = if (directive == null) .doc else .doc_with_directive,
             .data = if (directive == null) .{
-                .value = value_index,
+                .maybe_value = value_index,
             } else .{
                 .doc_with_directive = .{
                     .value = value_index,
@@ -502,31 +529,43 @@ pub const Parser = struct {
 
         log.debug("(map) end {s}@{d}", .{ @tagName(self.getToken(node_end).id), node_end });
 
-        try self.extra.ensureUnusedCapacity(gpa, entries.items.len * 2 + 1);
-        const extra_index: u32 = @intCast(self.extra.items.len);
-
-        _ = self.addExtraAssumeCapacity(Map{ .map_len = @intCast(entries.items.len) });
-
-        for (entries.items) |entry| {
-            _ = self.addExtraAssumeCapacity(entry);
-        }
-
-        self.nodes.set(node_index, .{
-            .tag = .map,
-            .data = .{ .extra = @enumFromInt(extra_index) },
-        });
-
         try self.nodes_scopes.putNoClobber(gpa, @enumFromInt(node_index), .{
             .start = node_start,
             .end = node_end,
         });
+
+        if (entries.items.len == 1) {
+            const entry = entries.items[0];
+
+            self.nodes.set(node_index, .{
+                .tag = .map_single,
+                .data = .{ .map = .{
+                    .key = entry.key,
+                    .value = entry.value,
+                } },
+            });
+        } else {
+            try self.extra.ensureUnusedCapacity(gpa, entries.items.len * 2 + 1);
+            const extra_index: u32 = @intCast(self.extra.items.len);
+
+            _ = self.addExtraAssumeCapacity(Map{ .map_len = @intCast(entries.items.len) });
+
+            for (entries.items) |entry| {
+                _ = self.addExtraAssumeCapacity(entry);
+            }
+
+            self.nodes.set(node_index, .{
+                .tag = .map_many,
+                .data = .{ .extra = @enumFromInt(extra_index) },
+            });
+        }
 
         return @as(Node.Index, @enumFromInt(node_index)).toOptional();
     }
 
     fn list(self: *Parser) ParseError!Node.OptionalIndex {
         const gpa = self.allocator;
-        const node_index = try self.nodes.addOne(gpa);
+        const node_index: Node.Index = @enumFromInt(try self.nodes.addOne(gpa));
         const node_start = self.token_it.pos;
 
         var values: std.ArrayListUnmanaged(List.Entry) = .empty;
@@ -564,31 +603,19 @@ pub const Parser = struct {
 
         log.debug("(list) end {s}@{d}", .{ @tagName(self.getToken(node_end).id), node_end });
 
-        try self.extra.ensureUnusedCapacity(gpa, values.items.len + 1);
-        const extra_index: u32 = @intCast(self.extra.items.len);
-
-        _ = self.addExtraAssumeCapacity(List{ .list_len = @intCast(values.items.len) });
-
-        for (values.items) |entry| {
-            _ = self.addExtraAssumeCapacity(entry);
-        }
-
-        self.nodes.set(node_index, .{
-            .tag = .list,
-            .data = .{ .extra = @enumFromInt(extra_index) },
-        });
-
-        try self.nodes_scopes.putNoClobber(gpa, @enumFromInt(node_index), .{
+        try self.nodes_scopes.putNoClobber(gpa, node_index, .{
             .start = node_start,
             .end = node_end,
         });
 
-        return @as(Node.Index, @enumFromInt(node_index)).toOptional();
+        try self.encodeList(gpa, node_index, values.items);
+
+        return node_index.toOptional();
     }
 
-    fn list_bracketed(self: *Parser) ParseError!Node.OptionalIndex {
+    fn listBracketed(self: *Parser) ParseError!Node.OptionalIndex {
         const gpa = self.allocator;
-        const node_index = try self.nodes.addOne(gpa);
+        const node_index: Node.Index = @enumFromInt(try self.nodes.addOne(gpa));
         const node_start = self.token_it.pos;
 
         var values: std.ArrayListUnmanaged(List.Entry) = .empty;
@@ -614,29 +641,56 @@ pub const Parser = struct {
 
         log.debug("(list) end {s}@{d}", .{ @tagName(self.getToken(node_end).id), node_end });
 
-        try self.extra.ensureUnusedCapacity(gpa, values.items.len + 1);
-        const extra_index: u32 = @intCast(self.extra.items.len);
-
-        _ = self.addExtraAssumeCapacity(List{ .list_len = @intCast(values.items.len) });
-
-        for (values.items) |index| {
-            _ = self.addExtraAssumeCapacity(index);
-        }
-
-        self.nodes.set(node_index, .{
-            .tag = .list,
-            .data = .{ .extra = @enumFromInt(extra_index) },
-        });
-
-        try self.nodes_scopes.putNoClobber(gpa, @enumFromInt(node_index), .{
+        try self.nodes_scopes.putNoClobber(gpa, node_index, .{
             .start = node_start,
             .end = node_end,
         });
 
-        return @as(Node.Index, @enumFromInt(node_index)).toOptional();
+        try self.encodeList(gpa, node_index, values.items);
+
+        return node_index.toOptional();
     }
 
-    fn leaf_value(self: *Parser) ParseError!Node.OptionalIndex {
+    fn encodeList(self: *Parser, gpa: Allocator, node_index: Node.Index, values: []const List.Entry) Allocator.Error!void {
+        const index = @intFromEnum(node_index);
+        switch (values.len) {
+            0 => {
+                self.nodes.set(index, .{
+                    .tag = .list_empty,
+                    .data = undefined,
+                });
+            },
+            1 => {
+                self.nodes.set(index, .{
+                    .tag = .list_one,
+                    .data = .{ .value = values[0].value },
+                });
+            },
+            2 => {
+                self.nodes.set(index, .{ .tag = .list_two, .data = .{ .list = .{
+                    .el1 = values[0].value,
+                    .el2 = values[1].value,
+                } } });
+            },
+            else => {
+                try self.extra.ensureUnusedCapacity(gpa, values.len + 1);
+                const extra_index: u32 = @intCast(self.extra.items.len);
+
+                _ = self.addExtraAssumeCapacity(List{ .list_len = @intCast(values.len) });
+
+                for (values) |entry| {
+                    _ = self.addExtraAssumeCapacity(entry);
+                }
+
+                self.nodes.set(index, .{
+                    .tag = .list_many,
+                    .data = .{ .extra = @enumFromInt(extra_index) },
+                });
+            },
+        }
+    }
+
+    fn leafValue(self: *Parser) ParseError!Node.OptionalIndex {
         const gpa = self.allocator;
         const node_index = try self.nodes.addOne(gpa);
         const node_start = self.token_it.pos;

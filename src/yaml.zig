@@ -158,7 +158,7 @@ pub const Value = union(enum) {
         const tag = tree.nodeTag(node_index);
         switch (tag) {
             .doc => {
-                const inner = tree.nodeData(node_index).value.unwrap() orelse
+                const inner = tree.nodeData(node_index).maybe_value.unwrap() orelse
                     // empty doc
                     return Value{ .empty = {} };
                 return Value.fromNode(arena, tree, inner);
@@ -169,14 +169,35 @@ pub const Value = union(enum) {
                     return Value{ .empty = {} };
                 return Value.fromNode(arena, tree, inner);
             },
-            .map => {
+            .map_single => {
+                const entry = tree.nodeData(node_index).map;
+
+                // TODO use ContextAdapted HashMap and do not duplicate keys, intern
+                // in a contiguous string buffer.
+                var out_map = std.StringArrayHashMap(Value).init(arena);
+                try out_map.ensureTotalCapacity(1);
+
+                const key = try arena.dupe(u8, tree.getRaw(entry.key, entry.key));
+                const gop = out_map.getOrPutAssumeCapacity(key);
+                if (gop.found_existing) {
+                    return error.DuplicateMapKey;
+                }
+                const value = if (entry.value.unwrap()) |value|
+                    try Value.fromNode(arena, tree, value)
+                else
+                    .empty;
+                gop.value_ptr.* = value;
+
+                return Value{ .map = out_map };
+            },
+            .map_many => {
                 const extra_index = tree.nodeData(node_index).extra;
                 const map = tree.extraData(parse_util.Map, extra_index);
 
                 // TODO use ContextAdapted HashMap and do not duplicate keys, intern
                 // in a contiguous string buffer.
                 var out_map = std.StringArrayHashMap(Value).init(arena);
-                try out_map.ensureUnusedCapacity(map.data.map_len);
+                try out_map.ensureTotalCapacity(map.data.map_len);
 
                 var extra_end = map.end;
                 for (0..map.data.map_len) |_| {
@@ -197,12 +218,39 @@ pub const Value = union(enum) {
 
                 return Value{ .map = out_map };
             },
-            .list => {
+            .list_empty => {
+                return Value{ .list = &.{} };
+            },
+            .list_one => {
+                const value_index = tree.nodeData(node_index).value;
+
+                var out_list = std.ArrayList(Value).init(arena);
+                try out_list.ensureTotalCapacityPrecise(1);
+
+                const value = try Value.fromNode(arena, tree, value_index);
+                out_list.appendAssumeCapacity(value);
+
+                return Value{ .list = try out_list.toOwnedSlice() };
+            },
+            .list_two => {
+                const list = tree.nodeData(node_index).list;
+
+                var out_list = std.ArrayList(Value).init(arena);
+                try out_list.ensureTotalCapacityPrecise(2);
+
+                for (&[2]Node.Index{ list.el1, list.el2 }) |value_index| {
+                    const value = try Value.fromNode(arena, tree, value_index);
+                    out_list.appendAssumeCapacity(value);
+                }
+
+                return Value{ .list = try out_list.toOwnedSlice() };
+            },
+            .list_many => {
                 const extra_index = tree.nodeData(node_index).extra;
                 const list = tree.extraData(parse_util.List, extra_index);
 
                 var out_list = std.ArrayList(Value).init(arena);
-                try out_list.ensureUnusedCapacity(list.data.list_len);
+                try out_list.ensureTotalCapacityPrecise(list.data.list_len);
 
                 var extra_end = list.end;
                 for (0..list.data.list_len) |_| {
