@@ -8,6 +8,162 @@ const Tokenizer = @import("Tokenizer.zig");
 const Token = Tokenizer.Token;
 const TokenIterator = Tokenizer.TokenIterator;
 
+pub const Node = struct {
+    tag: Tag,
+    scope: Scope,
+    data: Data,
+
+    pub const Tag = enum(u8) {
+        /// Document with no extra metadata.
+        /// Comprises an index into another Node.
+        /// Payload is maybe_value.
+        doc,
+
+        /// Document with directive.
+        /// Payload is doc_with_directive.
+        doc_with_directive,
+
+        /// Map with a single key-value pair.
+        /// Payload is map.
+        map_single,
+
+        /// Map with more than one key-value pair.
+        /// Comprises an index into extras where payload is Map.
+        /// Payload is extra.
+        map_many,
+
+        /// Empty list.
+        /// Payload is unused.
+        list_empty,
+
+        /// List with one element.
+        /// Payload is value.
+        list_one,
+
+        /// List with two elements.
+        /// Payload is list.
+        list_two,
+
+        /// List of more than 2 elements.
+        /// Comprises an index into extras where payload is List.
+        /// Payload is extra.
+        list_many,
+
+        /// String that didn't require any preprocessing.
+        /// Value is encoded directly as scope.
+        /// Payload is unused.
+        value,
+
+        /// String that required preprocessing such as a quoted string.
+        /// Payload is string.
+        string_value,
+    };
+
+    /// Describes the Token range that encapsulates this Node.
+    pub const Scope = struct {
+        start: Token.Index,
+        end: Token.Index,
+    };
+
+    pub const Data = union {
+        /// Node index.
+        node: Index,
+
+        /// Optional Node index.
+        maybe_node: OptionalIndex,
+
+        /// Document with a directive metadata.
+        doc_with_directive: struct {
+            maybe_node: OptionalIndex,
+            directive: Token.Index,
+        },
+
+        /// Map with exactly one key-value pair.
+        map: struct {
+            key: Token.Index,
+            maybe_node: OptionalIndex,
+        },
+
+        /// List with exactly two elements.
+        list: struct {
+            el1: Index,
+            el2: Index,
+        },
+
+        /// Index and length into the string table.
+        string: String,
+
+        /// Index into extra array.
+        extra: Extra,
+    };
+
+    pub const Index = enum(u32) {
+        _,
+
+        pub fn toOptional(ind: Index) OptionalIndex {
+            const result: OptionalIndex = @enumFromInt(@intFromEnum(ind));
+            assert(result != .none);
+            return result;
+        }
+    };
+
+    pub const OptionalIndex = enum(u32) {
+        none = std.math.maxInt(u32),
+        _,
+
+        pub fn unwrap(opt: OptionalIndex) ?Index {
+            if (opt == .none) return null;
+            return @enumFromInt(@intFromEnum(opt));
+        }
+    };
+
+    // Make sure we don't accidentally make nodes bigger than expected.
+    // Note that in safety builds, Zig is allowed to insert a secret field for safety checks.
+    comptime {
+        if (!std.debug.runtime_safety) {
+            assert(@sizeOf(Data) == 8);
+        }
+    }
+};
+
+/// Index into extra array.
+pub const Extra = enum(u32) {
+    _,
+};
+
+/// Trailing is a list of MapEntries.
+pub const Map = struct {
+    map_len: u32,
+
+    pub const Entry = struct {
+        key: Token.Index,
+        maybe_node: Node.OptionalIndex,
+    };
+};
+
+/// Trailing is a list of Node indexes.
+pub const List = struct {
+    list_len: u32,
+
+    pub const Entry = struct {
+        node: Node.Index,
+    };
+};
+
+/// Index and length into string table.
+pub const String = struct {
+    index: Index,
+    len: u32,
+
+    pub const Index = enum(u32) {
+        _,
+    };
+
+    pub fn slice(str: String, tree: Tree) []const u8 {
+        return tree.string_bytes[@intFromEnum(str.index)..][0..str.len];
+    }
+};
+
 pub const ParseError = error{
     InvalidEscapeSequence,
     MalformedYaml,
@@ -17,335 +173,218 @@ pub const ParseError = error{
     Unhandled,
 } || Allocator.Error;
 
-pub const Node = struct {
-    tag: Tag,
-    tree: *const Tree,
-    start: Token.Index,
-    end: Token.Index,
-
-    pub const Tag = enum {
-        doc,
-        map,
-        list,
-        value,
-    };
-
-    pub fn cast(self: *const Node, comptime T: type) ?*const T {
-        if (self.tag != T.base_tag) {
-            return null;
-        }
-        return @fieldParentPtr("base", self);
-    }
-
-    pub fn deinit(self: *Node, allocator: Allocator) void {
-        switch (self.tag) {
-            .doc => {
-                const parent: *Node.Doc = @fieldParentPtr("base", self);
-                parent.deinit(allocator);
-                allocator.destroy(parent);
-            },
-            .map => {
-                const parent: *Node.Map = @fieldParentPtr("base", self);
-                parent.deinit(allocator);
-                allocator.destroy(parent);
-            },
-            .list => {
-                const parent: *Node.List = @fieldParentPtr("base", self);
-                parent.deinit(allocator);
-                allocator.destroy(parent);
-            },
-            .value => {
-                const parent: *Node.Value = @fieldParentPtr("base", self);
-                parent.deinit(allocator);
-                allocator.destroy(parent);
-            },
-        }
-    }
-
-    pub fn format(
-        self: *const Node,
-        comptime fmt: []const u8,
-        options: std.fmt.FormatOptions,
-        writer: anytype,
-    ) !void {
-        return switch (self.tag) {
-            .doc => @as(*const Node.Doc, @fieldParentPtr("base", self)).format(fmt, options, writer),
-            .map => @as(*const Node.Map, @fieldParentPtr("base", self)).format(fmt, options, writer),
-            .list => @as(*const Node.List, @fieldParentPtr("base", self)).format(fmt, options, writer),
-            .value => @as(*const Node.Value, @fieldParentPtr("base", self)).format(fmt, options, writer),
-        };
-    }
-
-    pub const Doc = struct {
-        base: Node = Node{
-            .tag = Tag.doc,
-            .tree = undefined,
-            .start = undefined,
-            .end = undefined,
-        },
-        directive: ?Token.Index = null,
-        value: ?*Node = null,
-
-        pub const base_tag: Node.Tag = .doc;
-
-        pub fn deinit(self: *Doc, allocator: Allocator) void {
-            if (self.value) |node| {
-                node.deinit(allocator);
-            }
-        }
-
-        pub fn format(
-            self: *const Doc,
-            comptime fmt: []const u8,
-            options: std.fmt.FormatOptions,
-            writer: anytype,
-        ) !void {
-            _ = options;
-            _ = fmt;
-            if (self.directive) |id| {
-                try std.fmt.format(writer, "{{ ", .{});
-                const directive = self.base.tree.getRaw(id, id);
-                try std.fmt.format(writer, ".directive = {s}, ", .{directive});
-            }
-            if (self.value) |node| {
-                try std.fmt.format(writer, "{}", .{node});
-            }
-            if (self.directive != null) {
-                try std.fmt.format(writer, " }}", .{});
-            }
-        }
-    };
-
-    pub const Map = struct {
-        base: Node = Node{
-            .tag = Tag.map,
-            .tree = undefined,
-            .start = undefined,
-            .end = undefined,
-        },
-        values: std.ArrayListUnmanaged(Entry) = .{},
-
-        pub const base_tag: Node.Tag = .map;
-
-        pub const Entry = struct {
-            key: Token.Index,
-            value: ?*Node,
-        };
-
-        pub fn deinit(self: *Map, allocator: Allocator) void {
-            for (self.values.items) |entry| {
-                if (entry.value) |value| {
-                    value.deinit(allocator);
-                }
-            }
-            self.values.deinit(allocator);
-        }
-
-        pub fn format(
-            self: *const Map,
-            comptime fmt: []const u8,
-            options: std.fmt.FormatOptions,
-            writer: anytype,
-        ) !void {
-            _ = options;
-            _ = fmt;
-            try std.fmt.format(writer, "{{ ", .{});
-            for (self.values.items) |entry| {
-                const key = self.base.tree.getRaw(entry.key, entry.key);
-                if (entry.value) |value| {
-                    try std.fmt.format(writer, "{s} => {}, ", .{ key, value });
-                } else {
-                    try std.fmt.format(writer, "{s} => null, ", .{key});
-                }
-            }
-            return std.fmt.format(writer, " }}", .{});
-        }
-    };
-
-    pub const List = struct {
-        base: Node = Node{
-            .tag = Tag.list,
-            .tree = undefined,
-            .start = undefined,
-            .end = undefined,
-        },
-        values: std.ArrayListUnmanaged(*Node) = .{},
-
-        pub const base_tag: Node.Tag = .list;
-
-        pub fn deinit(self: *List, allocator: Allocator) void {
-            for (self.values.items) |node| {
-                node.deinit(allocator);
-            }
-            self.values.deinit(allocator);
-        }
-
-        pub fn format(
-            self: *const List,
-            comptime fmt: []const u8,
-            options: std.fmt.FormatOptions,
-            writer: anytype,
-        ) !void {
-            _ = options;
-            _ = fmt;
-            try std.fmt.format(writer, "[ ", .{});
-            for (self.values.items) |node| {
-                try std.fmt.format(writer, "{}, ", .{node});
-            }
-            return std.fmt.format(writer, " ]", .{});
-        }
-    };
-
-    pub const Value = struct {
-        base: Node = Node{
-            .tag = Tag.value,
-            .tree = undefined,
-            .start = undefined,
-            .end = undefined,
-        },
-        string_value: std.ArrayListUnmanaged(u8) = .{},
-
-        pub const base_tag: Node.Tag = .value;
-
-        pub fn deinit(self: *Value, allocator: Allocator) void {
-            self.string_value.deinit(allocator);
-        }
-
-        pub fn format(
-            self: *const Value,
-            comptime fmt: []const u8,
-            options: std.fmt.FormatOptions,
-            writer: anytype,
-        ) !void {
-            _ = options;
-            _ = fmt;
-            const raw = self.base.tree.getRaw(self.base.start, self.base.end);
-            return std.fmt.format(writer, "{s}", .{raw});
-        }
-    };
-};
-
+/// Tracked line-column information for each Token.
 pub const LineCol = struct {
     line: usize,
     col: usize,
 };
 
-pub const Tree = struct {
-    allocator: Allocator,
-    source: []const u8,
-    tokens: []Token,
-    line_cols: std.AutoHashMap(Token.Index, LineCol),
-    docs: std.ArrayListUnmanaged(*Node) = .{},
+/// Token with line-column information.
+pub const TokenWithLineCol = struct {
+    token: Token,
+    line_col: LineCol,
+};
 
-    pub fn init(allocator: Allocator) Tree {
+pub const Tree = struct {
+    source: []const u8,
+    tokens: std.MultiArrayList(TokenWithLineCol).Slice,
+    docs: []const Node.Index,
+    nodes: std.MultiArrayList(Node).Slice,
+    extra: []const u32,
+    string_bytes: []const u8,
+
+    pub fn deinit(self: *Tree, gpa: Allocator) void {
+        self.tokens.deinit(gpa);
+        self.nodes.deinit(gpa);
+        gpa.free(self.docs);
+        gpa.free(self.extra);
+        gpa.free(self.string_bytes);
+        self.* = undefined;
+    }
+
+    pub fn nodeTag(tree: Tree, node: Node.Index) Node.Tag {
+        return tree.nodes.items(.tag)[@intFromEnum(node)];
+    }
+
+    pub fn nodeData(tree: Tree, node: Node.Index) Node.Data {
+        return tree.nodes.items(.data)[@intFromEnum(node)];
+    }
+
+    pub fn nodeScope(tree: Tree, node: Node.Index) Node.Scope {
+        return tree.nodes.items(.scope)[@intFromEnum(node)];
+    }
+
+    /// Returns the requested data, as well as the new index which is at the start of the
+    /// trailers for the object.
+    pub fn extraData(tree: Tree, comptime T: type, index: Extra) struct { data: T, end: Extra } {
+        const fields = std.meta.fields(T);
+        var i = @intFromEnum(index);
+        var result: T = undefined;
+        inline for (fields) |field| {
+            @field(result, field.name) = switch (field.type) {
+                u32 => tree.extra[i],
+                i32 => @bitCast(tree.extra[i]),
+                Node.Index, Node.OptionalIndex, Token.Index => @enumFromInt(tree.extra[i]),
+                else => @compileError("bad field type: " ++ @typeName(field.type)),
+            };
+            i += 1;
+        }
         return .{
-            .allocator = allocator,
-            .source = undefined,
-            .tokens = undefined,
-            .line_cols = std.AutoHashMap(Token.Index, LineCol).init(allocator),
+            .data = result,
+            .end = @enumFromInt(i),
         };
     }
 
-    pub fn deinit(self: *Tree) void {
-        self.allocator.free(self.tokens);
-        self.line_cols.deinit();
-        for (self.docs.items) |doc| {
-            doc.deinit(self.allocator);
+    /// Returns the directive metadata if present.
+    pub fn directive(self: Tree, node_index: Node.Index) ?[]const u8 {
+        const tag = self.nodeTag(node_index);
+        switch (tag) {
+            .doc => return null,
+            .doc_with_directive => {
+                const data = self.nodeData(node_index).doc_with_directive;
+                return self.rawString(data.directive, data.directive);
+            },
+            else => unreachable,
         }
-        self.docs.deinit(self.allocator);
     }
 
-    pub fn getDirective(self: Tree, doc_index: usize) ?[]const u8 {
-        assert(doc_index < self.docs.items.len);
-        const doc = self.docs.items[doc_index].cast(Node.Doc) orelse return null;
-        const id = doc.directive orelse return null;
-        return self.getRaw(id, id);
-    }
-
-    pub fn getRaw(self: Tree, start: Token.Index, end: Token.Index) []const u8 {
-        const start_token = self.getToken(start);
-        const end_token = self.getToken(end);
+    /// Returns the raw string such that it matches the range [start, end) in the Token stream.
+    pub fn rawString(self: Tree, start: Token.Index, end: Token.Index) []const u8 {
+        const start_token = self.token(start);
+        const end_token = self.token(end);
         return self.source[start_token.loc.start..end_token.loc.end];
     }
 
-    pub fn getToken(self: Tree, index: Token.Index) Token {
-        return self.tokens[@intFromEnum(index)];
+    pub fn token(self: Tree, index: Token.Index) Token {
+        return self.tokens.items(.token)[@intFromEnum(index)];
+    }
+};
+
+pub const Parser = struct {
+    allocator: Allocator,
+    source: []const u8,
+    tokens: std.MultiArrayList(TokenWithLineCol) = .{},
+    token_it: TokenIterator = undefined,
+    docs: std.ArrayListUnmanaged(Node.Index) = .empty,
+    nodes: std.MultiArrayList(Node) = .empty,
+    extra: std.ArrayListUnmanaged(u32) = .empty,
+    string_bytes: std.ArrayListUnmanaged(u8) = .empty,
+
+    pub fn deinit(self: *Parser) void {
+        const gpa = self.allocator;
+        self.tokens.deinit(gpa);
+        self.docs.deinit(gpa);
+        self.nodes.deinit(gpa);
+        self.extra.deinit(gpa);
+        self.string_bytes.deinit(gpa);
+        self.* = undefined;
     }
 
-    pub fn parse(self: *Tree, source: []const u8) !void {
-        var tokenizer = Tokenizer{ .buffer = source };
-        var tokens = std.ArrayList(Token).init(self.allocator);
-        defer tokens.deinit();
+    pub fn parse(self: *Parser) ParseError!void {
+        const gpa = self.allocator;
 
+        var tokenizer = Tokenizer{ .buffer = self.source };
         var line: usize = 0;
         var prev_line_last_col: usize = 0;
 
         while (true) {
-            const token = tokenizer.next();
-            const tok_id: Token.Index = @enumFromInt(tokens.items.len);
-            try tokens.append(token);
+            const tok = tokenizer.next();
+            const tok_index = try self.tokens.addOne(gpa);
 
-            try self.line_cols.putNoClobber(tok_id, .{
-                .line = line,
-                .col = token.loc.start - prev_line_last_col,
+            self.tokens.set(tok_index, .{
+                .token = tok,
+                .line_col = .{
+                    .line = line,
+                    .col = tok.loc.start - prev_line_last_col,
+                },
             });
 
-            switch (token.id) {
+            switch (tok.id) {
                 .eof => break,
                 .new_line => {
                     line += 1;
-                    prev_line_last_col = token.loc.end;
+                    prev_line_last_col = tok.loc.end;
                 },
                 else => {},
             }
         }
 
-        self.source = source;
-        self.tokens = try tokens.toOwnedSlice();
+        self.token_it = .{ .buffer = self.tokens.items(.token) };
 
-        var it = TokenIterator{ .buffer = self.tokens };
-        var parser = Parser{
-            .allocator = self.allocator,
-            .tree = self,
-            .token_it = &it,
-            .line_cols = &self.line_cols,
-        };
-
-        parser.eatCommentsAndSpace(&.{});
+        self.eatCommentsAndSpace(&.{});
 
         while (true) {
-            parser.eatCommentsAndSpace(&.{});
-            const token = parser.token_it.next() orelse break;
+            self.eatCommentsAndSpace(&.{});
+            const tok = self.token_it.next() orelse break;
 
-            log.debug("(main) next {s}@{d}", .{ @tagName(token.id), @intFromEnum(parser.token_it.pos) - 1 });
+            log.debug("(main) next {s}@{d}", .{ @tagName(tok.id), @intFromEnum(self.token_it.pos) - 1 });
 
-            switch (token.id) {
+            switch (tok.id) {
                 .eof => break,
                 else => {
-                    parser.token_it.seekBy(-1);
-                    const doc = try parser.doc();
-                    try self.docs.append(self.allocator, doc);
+                    self.token_it.seekBy(-1);
+                    const node_index = try self.doc();
+                    try self.docs.append(gpa, node_index);
                 },
             }
         }
     }
-};
 
-const Parser = struct {
-    allocator: Allocator,
-    tree: *Tree,
-    token_it: *TokenIterator,
-    line_cols: *const std.AutoHashMap(Token.Index, LineCol),
+    pub fn toOwnedTree(self: *Parser) Allocator.Error!Tree {
+        const gpa = self.allocator;
+        return .{
+            .source = self.source,
+            .tokens = self.tokens.toOwnedSlice(),
+            .docs = try self.docs.toOwnedSlice(gpa),
+            .nodes = self.nodes.toOwnedSlice(),
+            .extra = try self.extra.toOwnedSlice(gpa),
+            .string_bytes = try self.string_bytes.toOwnedSlice(gpa),
+        };
+    }
 
-    fn value(self: *Parser) ParseError!?*Node {
+    fn addString(self: *Parser, string: []const u8) Allocator.Error!String {
+        const gpa = self.allocator;
+        const index: u32 = @intCast(self.string_bytes.items.len);
+        try self.string_bytes.ensureUnusedCapacity(gpa, string.len);
+        self.string_bytes.appendSliceAssumeCapacity(string);
+        return .{ .index = @enumFromInt(index), .len = @intCast(string.len) };
+    }
+
+    fn addExtra(self: *Parser, extra: anytype) Allocator.Error!u32 {
+        const fields = std.meta.fields(@TypeOf(extra));
+        try self.extra.ensureUnusedCapacity(self.gpa, fields.len);
+        return self.addExtraAssumeCapacity(extra);
+    }
+
+    fn addExtraAssumeCapacity(self: *Parser, extra: anytype) u32 {
+        const result: u32 = @intCast(self.extra.items.len);
+        self.extra.appendSliceAssumeCapacity(&payloadToExtraItems(extra));
+        return result;
+    }
+
+    fn payloadToExtraItems(data: anytype) [@typeInfo(@TypeOf(data)).@"struct".fields.len]u32 {
+        const fields = @typeInfo(@TypeOf(data)).@"struct".fields;
+        var result: [fields.len]u32 = undefined;
+        inline for (&result, fields) |*val, field| {
+            val.* = switch (field.type) {
+                u32 => @field(data, field.name),
+                i32 => @bitCast(@field(data, field.name)),
+                Node.Index, Node.OptionalIndex, Token.Index => @intFromEnum(@field(data, field.name)),
+                else => @compileError("bad field type: " ++ @typeName(field.type)),
+            };
+        }
+        return result;
+    }
+
+    fn value(self: *Parser) ParseError!Node.OptionalIndex {
         self.eatCommentsAndSpace(&.{});
 
         const pos = self.token_it.pos;
-        const token = self.token_it.next() orelse return error.UnexpectedEof;
+        const tok = self.token_it.next() orelse return error.UnexpectedEof;
 
-        log.debug("  next {s}@{d}", .{ @tagName(token.id), pos });
+        log.debug("  next {s}@{d}", .{ @tagName(tok.id), pos });
 
-        switch (token.id) {
+        switch (tok.id) {
             .literal => if (self.eatToken(.map_value_ind, &.{ .new_line, .comment })) |_| {
                 // map
                 self.token_it.seekTo(pos);
@@ -353,12 +392,12 @@ const Parser = struct {
             } else {
                 // leaf value
                 self.token_it.seekTo(pos);
-                return self.leaf_value();
+                return self.leafValue();
             },
             .single_quoted, .double_quoted => {
                 // leaf value
                 self.token_it.seekBy(-1);
-                return self.leaf_value();
+                return self.leafValue();
             },
             .seq_item_ind => {
                 // list
@@ -368,93 +407,104 @@ const Parser = struct {
             .flow_seq_start => {
                 // list
                 self.token_it.seekBy(-1);
-                return self.list_bracketed();
+                return self.listBracketed();
             },
-            else => return null,
+            else => return .none,
         }
     }
 
-    fn doc(self: *Parser) ParseError!*Node {
-        const node = try self.allocator.create(Node.Doc);
-        errdefer self.allocator.destroy(node);
-        node.* = .{};
-        node.base.tree = self.tree;
-        node.base.start = self.token_it.pos;
+    fn doc(self: *Parser) ParseError!Node.Index {
+        const gpa = self.allocator;
+        const node_index = try self.nodes.addOne(gpa);
+        const node_start = self.token_it.pos;
 
-        log.debug("(doc) begin {s}@{d}", .{ @tagName(self.tree.getToken(node.base.start).id), node.base.start });
+        log.debug("(doc) begin {s}@{d}", .{ @tagName(self.token(node_start).id), node_start });
 
         // Parse header
-        const explicit_doc: bool = if (self.eatToken(.doc_start, &.{})) |doc_pos| explicit_doc: {
+        const header: union(enum) {
+            directive: Token.Index,
+            explicit,
+            implicit,
+        } = if (self.eatToken(.doc_start, &.{})) |doc_pos| explicit: {
             if (self.getCol(doc_pos) > 0) return error.MalformedYaml;
             if (self.eatToken(.tag, &.{ .new_line, .comment })) |_| {
-                node.directive = try self.expectToken(.literal, &.{ .new_line, .comment });
+                break :explicit .{ .directive = try self.expectToken(.literal, &.{ .new_line, .comment }) };
             }
-            break :explicit_doc true;
-        } else false;
-
-        // Parse value
-        node.value = try self.value();
-        if (node.value == null) {
-            self.token_it.seekBy(-1);
-        }
-        errdefer if (node.value) |val| {
-            val.deinit(self.allocator);
+            break :explicit .explicit;
+        } else .implicit;
+        const directive = switch (header) {
+            .directive => |index| index,
+            else => null,
+        };
+        const is_explicit = switch (header) {
+            .directive, .explicit => true,
+            .implicit => false,
         };
 
+        // Parse value
+        const value_index = try self.value();
+        if (value_index == .none) {
+            self.token_it.seekBy(-1);
+        }
+
         // Parse footer
-        footer: {
+        const node_end: Token.Index = footer: {
             if (self.eatToken(.doc_end, &.{})) |pos| {
-                if (!explicit_doc) return error.UnexpectedToken;
+                if (!is_explicit) return error.UnexpectedToken;
                 if (self.getCol(pos) > 0) return error.MalformedYaml;
-                node.base.end = pos;
-                break :footer;
+                break :footer pos;
             }
             if (self.eatToken(.doc_start, &.{})) |pos| {
-                if (!explicit_doc) return error.UnexpectedToken;
+                if (!is_explicit) return error.UnexpectedToken;
                 if (self.getCol(pos) > 0) return error.MalformedYaml;
                 self.token_it.seekBy(-1);
-                node.base.end = @enumFromInt(@intFromEnum(pos) - 1);
-                break :footer;
+                break :footer @enumFromInt(@intFromEnum(pos) - 1);
             }
             if (self.eatToken(.eof, &.{})) |pos| {
-                node.base.end = @enumFromInt(@intFromEnum(pos) - 1);
-                break :footer;
+                break :footer @enumFromInt(@intFromEnum(pos) - 1);
             }
             return error.UnexpectedToken;
-        }
+        };
 
-        log.debug("(doc) end {s}@{d}", .{ @tagName(self.tree.getToken(node.base.end).id), node.base.end });
+        log.debug("(doc) end {s}@{d}", .{ @tagName(self.token(node_end).id), node_end });
 
-        return &node.base;
+        self.nodes.set(node_index, .{
+            .tag = if (directive == null) .doc else .doc_with_directive,
+            .scope = .{
+                .start = node_start,
+                .end = node_end,
+            },
+            .data = if (directive == null) .{
+                .maybe_node = value_index,
+            } else .{
+                .doc_with_directive = .{
+                    .maybe_node = value_index,
+                    .directive = directive.?,
+                },
+            },
+        });
+
+        return @enumFromInt(node_index);
     }
 
-    fn map(self: *Parser) ParseError!*Node {
-        const node = try self.allocator.create(Node.Map);
-        errdefer self.allocator.destroy(node);
-        node.* = .{};
-        node.base.tree = self.tree;
-        node.base.start = self.token_it.pos;
-        errdefer {
-            for (node.values.items) |entry| {
-                if (entry.value) |val| {
-                    val.deinit(self.allocator);
-                }
-            }
-            node.values.deinit(self.allocator);
-        }
+    fn map(self: *Parser) ParseError!Node.OptionalIndex {
+        const gpa = self.allocator;
+        const node_index = try self.nodes.addOne(gpa);
+        const node_start = self.token_it.pos;
 
-        log.debug("(map) begin {s}@{d}", .{ @tagName(self.tree.getToken(node.base.start).id), node.base.start });
+        var entries: std.ArrayListUnmanaged(Map.Entry) = .empty;
+        defer entries.deinit(gpa);
 
-        const col = self.getCol(node.base.start);
+        log.debug("(map) begin {s}@{d}", .{ @tagName(self.token(node_start).id), node_start });
+
+        const col = self.getCol(node_start);
 
         while (true) {
             self.eatCommentsAndSpace(&.{});
 
             // Parse key
             const key_pos = self.token_it.pos;
-            if (self.getCol(key_pos) < col) {
-                break;
-            }
+            if (self.getCol(key_pos) < col) break;
 
             const key = self.token_it.next() orelse return error.UnexpectedEof;
             switch (key.id) {
@@ -473,57 +523,83 @@ const Parser = struct {
                 },
             }
 
-            log.debug("(map) key {s}@{d}", .{ self.tree.getRaw(key_pos, key_pos), key_pos });
+            log.debug("(map) key {s}@{d}", .{ self.rawString(key_pos, key_pos), key_pos });
 
             // Separator
             _ = try self.expectToken(.map_value_ind, &.{ .new_line, .comment });
 
             // Parse value
-            const val = try self.value();
-            errdefer if (val) |v| {
-                v.deinit(self.allocator);
-            };
+            const value_index = try self.value();
 
-            if (val) |v| {
-                if (self.getCol(v.start) < self.getCol(key_pos)) {
+            if (value_index.unwrap()) |v| {
+                const value_start = self.nodes.items(.scope)[@intFromEnum(v)].start;
+                if (self.getCol(value_start) < self.getCol(key_pos)) {
                     return error.MalformedYaml;
                 }
-                if (v.cast(Node.Value)) |_| {
-                    if (self.getCol(v.start) == self.getCol(key_pos)) {
+                if (self.nodes.items(.tag)[@intFromEnum(v)] == .value) {
+                    if (self.getCol(value_start) == self.getCol(key_pos)) {
                         return error.MalformedYaml;
                     }
                 }
             }
 
-            try node.values.append(self.allocator, .{
+            try entries.append(gpa, .{
                 .key = key_pos,
-                .value = val,
+                .maybe_node = value_index,
             });
         }
 
-        node.base.end = @enumFromInt(@intFromEnum(self.token_it.pos) - 1);
+        const node_end: Token.Index = @enumFromInt(@intFromEnum(self.token_it.pos) - 1);
 
-        log.debug("(map) end {s}@{d}", .{ @tagName(self.tree.getToken(node.base.end).id), node.base.end });
+        log.debug("(map) end {s}@{d}", .{ @tagName(self.token(node_end).id), node_end });
 
-        return &node.base;
-    }
+        const scope: Node.Scope = .{
+            .start = node_start,
+            .end = node_end,
+        };
 
-    fn list(self: *Parser) ParseError!*Node {
-        const node = try self.allocator.create(Node.List);
-        errdefer self.allocator.destroy(node);
-        node.* = .{};
-        node.base.tree = self.tree;
-        node.base.start = self.token_it.pos;
-        errdefer {
-            for (node.values.items) |val| {
-                val.deinit(self.allocator);
+        if (entries.items.len == 1) {
+            const entry = entries.items[0];
+
+            self.nodes.set(node_index, .{
+                .tag = .map_single,
+                .scope = scope,
+                .data = .{ .map = .{
+                    .key = entry.key,
+                    .maybe_node = entry.maybe_node,
+                } },
+            });
+        } else {
+            try self.extra.ensureUnusedCapacity(gpa, entries.items.len * 2 + 1);
+            const extra_index: u32 = @intCast(self.extra.items.len);
+
+            _ = self.addExtraAssumeCapacity(Map{ .map_len = @intCast(entries.items.len) });
+
+            for (entries.items) |entry| {
+                _ = self.addExtraAssumeCapacity(entry);
             }
-            node.values.deinit(self.allocator);
+
+            self.nodes.set(node_index, .{
+                .tag = .map_many,
+                .scope = scope,
+                .data = .{ .extra = @enumFromInt(extra_index) },
+            });
         }
 
-        const first_col = self.getCol(node.base.start);
+        return @as(Node.Index, @enumFromInt(node_index)).toOptional();
+    }
 
-        log.debug("(list) begin {s}@{d}", .{ @tagName(self.tree.getToken(node.base.start).id), node.base.start });
+    fn list(self: *Parser) ParseError!Node.OptionalIndex {
+        const gpa = self.allocator;
+        const node_index: Node.Index = @enumFromInt(try self.nodes.addOne(gpa));
+        const node_start = self.token_it.pos;
+
+        var values: std.ArrayListUnmanaged(List.Entry) = .empty;
+        defer values.deinit(gpa);
+
+        const first_col = self.getCol(node_start);
+
+        log.debug("(list) begin {s}@{d}", .{ @tagName(self.token(node_start).id), node_start });
 
         while (true) {
             self.eatCommentsAndSpace(&.{});
@@ -543,74 +619,155 @@ const Parser = struct {
             //  an inner list will be parsed by self.value() so
             //  checking for  cur_col > first_col is not necessary here
 
-            const val = (try self.value()) orelse return error.MalformedYaml;
-            try node.values.append(self.allocator, val);
+            const value_index = try self.value();
+            if (value_index == .none) return error.MalformedYaml;
+
+            try values.append(gpa, .{ .node = value_index.unwrap().? });
         }
 
-        node.base.end = @enumFromInt(@intFromEnum(self.token_it.pos) - 1);
+        const node_end: Token.Index = @enumFromInt(@intFromEnum(self.token_it.pos) - 1);
 
-        log.debug("(list) end {s}@{d}", .{ @tagName(self.tree.getToken(node.base.end).id), node.base.end });
+        log.debug("(list) end {s}@{d}", .{ @tagName(self.token(node_end).id), node_end });
 
-        return &node.base;
+        try self.encodeList(gpa, node_index, values.items, .{
+            .start = node_start,
+            .end = node_end,
+        });
+
+        return node_index.toOptional();
     }
 
-    fn list_bracketed(self: *Parser) ParseError!*Node {
-        const node = try self.allocator.create(Node.List);
-        errdefer self.allocator.destroy(node);
-        node.* = .{};
-        node.base.tree = self.tree;
-        node.base.start = self.token_it.pos;
-        errdefer {
-            for (node.values.items) |val| {
-                val.deinit(self.allocator);
-            }
-            node.values.deinit(self.allocator);
-        }
+    fn listBracketed(self: *Parser) ParseError!Node.OptionalIndex {
+        const gpa = self.allocator;
+        const node_index: Node.Index = @enumFromInt(try self.nodes.addOne(gpa));
+        const node_start = self.token_it.pos;
 
-        log.debug("(list) begin {s}@{d}", .{ @tagName(self.tree.getToken(node.base.start).id), node.base.start });
+        var values: std.ArrayListUnmanaged(List.Entry) = .empty;
+        defer values.deinit(gpa);
+
+        log.debug("(list) begin {s}@{d}", .{ @tagName(self.token(node_start).id), node_start });
 
         _ = try self.expectToken(.flow_seq_start, &.{});
 
-        while (true) {
+        const node_end: Token.Index = while (true) {
             self.eatCommentsAndSpace(&.{.comment});
 
-            if (self.eatToken(.flow_seq_end, &.{.comment})) |pos| {
-                node.base.end = pos;
-                break;
-            }
+            if (self.eatToken(.flow_seq_end, &.{.comment})) |pos|
+                break pos;
+
             _ = self.eatToken(.comma, &.{.comment});
 
-            const val = (try self.value()) orelse return error.MalformedYaml;
-            try node.values.append(self.allocator, val);
-        }
+            const value_index = try self.value();
+            if (value_index == .none) return error.MalformedYaml;
 
-        log.debug("(list) end {s}@{d}", .{ @tagName(self.tree.getToken(node.base.end).id), node.base.end });
+            try values.append(gpa, .{ .node = value_index.unwrap().? });
+        };
 
-        return &node.base;
+        log.debug("(list) end {s}@{d}", .{ @tagName(self.token(node_end).id), node_end });
+
+        try self.encodeList(gpa, node_index, values.items, .{
+            .start = node_start,
+            .end = node_end,
+        });
+
+        return node_index.toOptional();
     }
 
-    fn leaf_value(self: *Parser) ParseError!*Node {
-        const node = try self.allocator.create(Node.Value);
-        errdefer self.allocator.destroy(node);
-        node.* = .{ .string_value = .{} };
-        node.base.tree = self.tree;
-        node.base.start = self.token_it.pos;
-        errdefer node.string_value.deinit(self.allocator);
+    fn encodeList(
+        self: *Parser,
+        gpa: Allocator,
+        node_index: Node.Index,
+        values: []const List.Entry,
+        node_scope: Node.Scope,
+    ) Allocator.Error!void {
+        const index = @intFromEnum(node_index);
+        switch (values.len) {
+            0 => {
+                self.nodes.set(index, .{
+                    .tag = .list_empty,
+                    .scope = node_scope,
+                    .data = undefined,
+                });
+            },
+            1 => {
+                self.nodes.set(index, .{
+                    .tag = .list_one,
+                    .scope = node_scope,
+                    .data = .{ .node = values[0].node },
+                });
+            },
+            2 => {
+                self.nodes.set(index, .{
+                    .tag = .list_two,
+                    .scope = node_scope,
+                    .data = .{ .list = .{
+                        .el1 = values[0].node,
+                        .el2 = values[1].node,
+                    } },
+                });
+            },
+            else => {
+                try self.extra.ensureUnusedCapacity(gpa, values.len + 1);
+                const extra_index: u32 = @intCast(self.extra.items.len);
+
+                _ = self.addExtraAssumeCapacity(List{ .list_len = @intCast(values.len) });
+
+                for (values) |entry| {
+                    _ = self.addExtraAssumeCapacity(entry);
+                }
+
+                self.nodes.set(index, .{
+                    .tag = .list_many,
+                    .scope = node_scope,
+                    .data = .{ .extra = @enumFromInt(extra_index) },
+                });
+            },
+        }
+    }
+
+    fn leafValue(self: *Parser) ParseError!Node.OptionalIndex {
+        const gpa = self.allocator;
+        const node_index: Node.Index = @enumFromInt(try self.nodes.addOne(gpa));
+        const node_start = self.token_it.pos;
 
         // TODO handle multiline strings in new block scope
         while (self.token_it.next()) |tok| {
             switch (tok.id) {
                 .single_quoted => {
-                    node.base.end = @enumFromInt(@intFromEnum(self.token_it.pos) - 1);
-                    const raw = self.tree.getRaw(node.base.start, node.base.end);
-                    try self.parseSingleQuoted(node, raw);
-                    break;
+                    const node_end: Token.Index = @enumFromInt(@intFromEnum(self.token_it.pos) - 1);
+                    const raw = self.rawString(node_start, node_end);
+                    log.debug("(leaf) {s}", .{raw});
+                    assert(raw.len > 0);
+                    const string = try self.parseSingleQuoted(raw);
+
+                    self.nodes.set(@intFromEnum(node_index), .{
+                        .tag = .string_value,
+                        .scope = .{
+                            .start = node_start,
+                            .end = node_end,
+                        },
+                        .data = .{ .string = string },
+                    });
+
+                    return node_index.toOptional();
                 },
                 .double_quoted => {
-                    node.base.end = @enumFromInt(@intFromEnum(self.token_it.pos) - 1);
-                    const raw = self.tree.getRaw(node.base.start, node.base.end);
-                    try self.parseDoubleQuoted(node, raw);
-                    break;
+                    const node_end: Token.Index = @enumFromInt(@intFromEnum(self.token_it.pos) - 1);
+                    const raw = self.rawString(node_start, node_end);
+                    log.debug("(leaf) {s}", .{raw});
+                    assert(raw.len > 0);
+                    const string = try self.parseDoubleQuoted(raw);
+
+                    self.nodes.set(@intFromEnum(node_index), .{
+                        .tag = .string_value,
+                        .scope = .{
+                            .start = node_start,
+                            .end = node_end,
+                        },
+                        .data = .{ .string = string },
+                    });
+
+                    return node_index.toOptional();
                 },
                 .literal => {},
                 .space => {
@@ -618,33 +775,45 @@ const Parser = struct {
                     self.eatCommentsAndSpace(&.{});
                     if (self.token_it.peek()) |peek| {
                         if (peek.id != .literal) {
-                            node.base.end = @enumFromInt(trailing);
-                            const raw = self.tree.getRaw(node.base.start, node.base.end);
-                            try node.string_value.appendSlice(self.allocator, raw);
-                            break;
+                            const node_end: Token.Index = @enumFromInt(trailing);
+                            log.debug("(leaf) {s}", .{self.rawString(node_start, node_end)});
+                            self.nodes.set(@intFromEnum(node_index), .{
+                                .tag = .value,
+                                .scope = .{
+                                    .start = node_start,
+                                    .end = node_end,
+                                },
+                                .data = undefined,
+                            });
+                            return node_index.toOptional();
                         }
                     }
                 },
                 else => {
                     self.token_it.seekBy(-1);
-                    node.base.end = @enumFromInt(@intFromEnum(self.token_it.pos) - 1);
-                    const raw = self.tree.getRaw(node.base.start, node.base.end);
-                    try node.string_value.appendSlice(self.allocator, raw);
-                    break;
+                    const node_end: Token.Index = @enumFromInt(@intFromEnum(self.token_it.pos) - 1);
+                    log.debug("(leaf) {s}", .{self.rawString(node_start, node_end)});
+                    self.nodes.set(@intFromEnum(node_index), .{
+                        .tag = .value,
+                        .scope = .{
+                            .start = node_start,
+                            .end = node_end,
+                        },
+                        .data = undefined,
+                    });
+                    return node_index.toOptional();
                 },
             }
         }
 
-        log.debug("(leaf) {s}", .{self.tree.getRaw(node.base.start, node.base.end)});
-
-        return &node.base;
+        return error.MalformedYaml;
     }
 
     fn eatCommentsAndSpace(self: *Parser, comptime exclusions: []const Token.Id) void {
         log.debug("eatCommentsAndSpace", .{});
-        outer: while (self.token_it.next()) |token| {
-            log.debug("  (token '{s}')", .{@tagName(token.id)});
-            switch (token.id) {
+        outer: while (self.token_it.next()) |tok| {
+            log.debug("  (token '{s}')", .{@tagName(tok.id)});
+            switch (tok.id) {
                 .comment, .space, .new_line => |space| {
                     inline for (exclusions) |excl| {
                         if (excl == space) {
@@ -665,8 +834,8 @@ const Parser = struct {
         log.debug("eatToken('{s}')", .{@tagName(id)});
         self.eatCommentsAndSpace(exclusions);
         const pos = self.token_it.pos;
-        const token = self.token_it.next() orelse return null;
-        if (token.id == id) {
+        const tok = self.token_it.next() orelse return null;
+        if (tok.id == id) {
             log.debug("  (found at {d})", .{pos});
             return pos;
         } else {
@@ -682,23 +851,30 @@ const Parser = struct {
     }
 
     fn getLine(self: *Parser, index: Token.Index) usize {
-        return self.line_cols.get(index).?.line;
+        return self.tokens.items(.line_col)[@intFromEnum(index)].line;
     }
 
     fn getCol(self: *Parser, index: Token.Index) usize {
-        return self.line_cols.get(index).?.col;
+        return self.tokens.items(.line_col)[@intFromEnum(index)].col;
     }
 
-    fn parseSingleQuoted(self: *Parser, node: *Node.Value, raw: []const u8) ParseError!void {
-        assert(raw[0] == '\'' and raw[raw.len - 1] == '\'');
+    fn parseSingleQuoted(self: *Parser, raw: []const u8) ParseError!String {
+        const gpa = self.allocator;
 
+        assert(raw[0] == '\'' and raw[raw.len - 1] == '\'');
         const raw_no_quotes = raw[1 .. raw.len - 1];
-        try node.string_value.ensureTotalCapacity(self.allocator, raw_no_quotes.len);
+
+        try self.string_bytes.ensureUnusedCapacity(gpa, raw_no_quotes.len);
+        var string: String = .{
+            .index = @enumFromInt(@as(u32, @intCast(self.string_bytes.items.len))),
+            .len = 0,
+        };
 
         var state: enum {
             start,
             escape,
         } = .start;
+
         var index: usize = 0;
 
         while (index < raw_no_quotes.len) : (index += 1) {
@@ -709,25 +885,35 @@ const Parser = struct {
                         state = .escape;
                     },
                     else => {
-                        node.string_value.appendAssumeCapacity(c);
+                        self.string_bytes.appendAssumeCapacity(c);
+                        string.len += 1;
                     },
                 },
                 .escape => switch (c) {
                     '\'' => {
                         state = .start;
-                        node.string_value.appendAssumeCapacity(c);
+                        self.string_bytes.appendAssumeCapacity(c);
+                        string.len += 1;
                     },
                     else => return error.InvalidEscapeSequence,
                 },
             }
         }
+
+        return string;
     }
 
-    fn parseDoubleQuoted(self: *Parser, node: *Node.Value, raw: []const u8) ParseError!void {
-        assert(raw[0] == '"' and raw[raw.len - 1] == '"');
+    fn parseDoubleQuoted(self: *Parser, raw: []const u8) ParseError!String {
+        const gpa = self.allocator;
 
+        assert(raw[0] == '"' and raw[raw.len - 1] == '"');
         const raw_no_quotes = raw[1 .. raw.len - 1];
-        try node.string_value.ensureTotalCapacity(self.allocator, raw_no_quotes.len);
+
+        try self.string_bytes.ensureUnusedCapacity(gpa, raw_no_quotes.len);
+        var string: String = .{
+            .index = @enumFromInt(@as(u32, @intCast(self.string_bytes.items.len))),
+            .len = 0,
+        };
 
         var state: enum {
             start,
@@ -735,6 +921,7 @@ const Parser = struct {
         } = .start;
 
         var index: usize = 0;
+
         while (index < raw_no_quotes.len) : (index += 1) {
             const c = raw_no_quotes[index];
             switch (state) {
@@ -743,26 +930,42 @@ const Parser = struct {
                         state = .escape;
                     },
                     else => {
-                        node.string_value.appendAssumeCapacity(c);
+                        self.string_bytes.appendAssumeCapacity(c);
+                        string.len += 1;
                     },
                 },
                 .escape => switch (c) {
                     'n' => {
                         state = .start;
-                        node.string_value.appendAssumeCapacity('\n');
+                        self.string_bytes.appendAssumeCapacity('\n');
+                        string.len += 1;
                     },
                     't' => {
                         state = .start;
-                        node.string_value.appendAssumeCapacity('\t');
+                        self.string_bytes.appendAssumeCapacity('\t');
+                        string.len += 1;
                     },
                     '"' => {
                         state = .start;
-                        node.string_value.appendAssumeCapacity('"');
+                        self.string_bytes.appendAssumeCapacity('"');
+                        string.len += 1;
                     },
                     else => return error.InvalidEscapeSequence,
                 },
             }
         }
+
+        return string;
+    }
+
+    fn rawString(self: Parser, start: Token.Index, end: Token.Index) []const u8 {
+        const start_token = self.token(start);
+        const end_token = self.token(end);
+        return self.source[start_token.loc.start..end_token.loc.end];
+    }
+
+    fn token(self: Parser, index: Token.Index) Token {
+        return self.tokens.items(.token)[@intFromEnum(index)];
     }
 };
 

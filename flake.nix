@@ -6,6 +6,7 @@
     flake-utils.url = "github:numtide/flake-utils";
     zig.url = "github:mitchellh/zig-overlay";
     zls.url = "github:zigtools/zls";
+    poop.url = "github:kubkon/poop/nix";
 
     # Used for shell.nix
     flake-compat = {
@@ -27,6 +28,7 @@
         (final: prev: {
           zigpkgs = inputs.zig.packages.${prev.system};
           zlspkgs = inputs.zls.packages.${prev.system};
+          pooppkgs = inputs.poop.packages.${prev.system};
         })
       ];
 
@@ -44,6 +46,7 @@
           nativeBuildInputs = with pkgs; [
             zigpkgs.master
             zlspkgs.default
+            pooppkgs.default
           ];
         };
 
