@@ -8,7 +8,6 @@ const Tokenizer = @import("Tokenizer.zig");
 const Token = Tokenizer.Token;
 const TokenIterator = Tokenizer.TokenIterator;
 
-/// TODO for each Node we need to track start-end Tokens too.
 pub const Node = struct {
     tag: Tag,
     scope: Scope,
@@ -165,18 +164,23 @@ pub const LineCol = struct {
     col: usize,
 };
 
+pub const TokenWithLineCol = struct {
+    token: Token,
+    line_col: LineCol,
+};
+
 pub const Tree = struct {
     source: []const u8,
-    tokens: []const Token,
+    tokens: std.MultiArrayList(TokenWithLineCol).Slice,
     docs: []const Node.Index,
     nodes: std.MultiArrayList(Node).Slice,
     extra: []const u32,
     string_bytes: []const u8,
 
     pub fn deinit(self: *Tree, gpa: Allocator) void {
-        gpa.free(self.tokens);
-        gpa.free(self.docs);
+        self.tokens.deinit(gpa);
         self.nodes.deinit(gpa);
+        gpa.free(self.docs);
         gpa.free(self.extra);
         gpa.free(self.string_bytes);
         self.* = undefined;
@@ -234,15 +238,15 @@ pub const Tree = struct {
     }
 
     pub fn getToken(self: Tree, index: Token.Index) Token {
-        return self.tokens[@intFromEnum(index)];
+        return self.tokens.items(.token)[@intFromEnum(index)];
     }
 };
 
 pub const Parser = struct {
     allocator: Allocator,
     source: []const u8,
+    tokens: std.MultiArrayList(TokenWithLineCol) = .{},
     token_it: TokenIterator = undefined,
-    line_cols: std.AutoHashMapUnmanaged(Token.Index, LineCol) = .empty,
     docs: std.ArrayListUnmanaged(Node.Index) = .empty,
     nodes: std.MultiArrayList(Node) = .empty,
     extra: std.ArrayListUnmanaged(u32) = .empty,
@@ -250,12 +254,11 @@ pub const Parser = struct {
 
     pub fn deinit(self: *Parser) void {
         const gpa = self.allocator;
+        self.tokens.deinit(gpa);
         self.docs.deinit(gpa);
         self.nodes.deinit(gpa);
         self.extra.deinit(gpa);
         self.string_bytes.deinit(gpa);
-        self.line_cols.deinit(gpa);
-        gpa.free(self.token_it.buffer);
         self.* = undefined;
     }
 
@@ -263,20 +266,19 @@ pub const Parser = struct {
         const gpa = self.allocator;
 
         var tokenizer = Tokenizer{ .buffer = self.source };
-        var tokens: std.ArrayListUnmanaged(Token) = .empty;
-        defer tokens.deinit(gpa);
-
         var line: usize = 0;
         var prev_line_last_col: usize = 0;
 
         while (true) {
             const token = tokenizer.next();
-            const tok_id: Token.Index = @enumFromInt(tokens.items.len);
-            try tokens.append(gpa, token);
+            const token_index = try self.tokens.addOne(gpa);
 
-            try self.line_cols.putNoClobber(gpa, tok_id, .{
-                .line = line,
-                .col = token.loc.start - prev_line_last_col,
+            self.tokens.set(token_index, .{
+                .token = token,
+                .line_col = .{
+                    .line = line,
+                    .col = token.loc.start - prev_line_last_col,
+                },
             });
 
             switch (token.id) {
@@ -289,7 +291,7 @@ pub const Parser = struct {
             }
         }
 
-        self.token_it = .{ .buffer = try tokens.toOwnedSlice(gpa) };
+        self.token_it = .{ .buffer = self.tokens.items(.token) };
 
         self.eatCommentsAndSpace(&.{});
 
@@ -312,12 +314,9 @@ pub const Parser = struct {
 
     pub fn toOwnedTree(self: *Parser) Allocator.Error!Tree {
         const gpa = self.allocator;
-        const tokens = try gpa.alloc(Token, self.token_it.buffer.len);
-        @memcpy(tokens, self.token_it.buffer);
-
         return .{
             .source = self.source,
-            .tokens = tokens,
+            .tokens = self.tokens.toOwnedSlice(),
             .docs = try self.docs.toOwnedSlice(gpa),
             .nodes = self.nodes.toOwnedSlice(),
             .extra = try self.extra.toOwnedSlice(gpa),
@@ -834,11 +833,11 @@ pub const Parser = struct {
     }
 
     fn getLine(self: *Parser, index: Token.Index) usize {
-        return self.line_cols.get(index).?.line;
+        return self.tokens.items(.line_col)[@intFromEnum(index)].line;
     }
 
     fn getCol(self: *Parser, index: Token.Index) usize {
-        return self.line_cols.get(index).?.col;
+        return self.tokens.items(.line_col)[@intFromEnum(index)].col;
     }
 
     fn parseSingleQuoted(self: *Parser, raw: []const u8) ParseError!String {
@@ -948,7 +947,7 @@ pub const Parser = struct {
     }
 
     fn getToken(self: Parser, index: Token.Index) Token {
-        return self.token_it.buffer[@intFromEnum(index)];
+        return self.tokens.items(.token)[@intFromEnum(index)];
     }
 };
 
