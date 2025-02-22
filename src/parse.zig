@@ -50,18 +50,18 @@ pub const Node = struct {
     };
 
     pub const Data = union {
-        value: Index,
+        node: Index,
 
-        maybe_value: OptionalIndex,
+        maybe_node: OptionalIndex,
 
         doc_with_directive: struct {
-            value: OptionalIndex,
+            maybe_node: OptionalIndex,
             directive: Token.Index,
         },
 
         map: struct {
             key: Token.Index,
-            value: OptionalIndex,
+            maybe_node: OptionalIndex,
         },
 
         list: struct {
@@ -113,7 +113,7 @@ pub const Map = struct {
 
     pub const Entry = struct {
         key: Token.Index,
-        value: Node.OptionalIndex,
+        maybe_node: Node.OptionalIndex,
     };
 };
 
@@ -122,7 +122,7 @@ pub const List = struct {
     list_len: u32,
 
     pub const Entry = struct {
-        value: Node.Index,
+        node: Node.Index,
     };
 };
 
@@ -446,10 +446,10 @@ pub const Parser = struct {
         self.nodes.set(node_index, .{
             .tag = if (directive == null) .doc else .doc_with_directive,
             .data = if (directive == null) .{
-                .maybe_value = value_index,
+                .maybe_node = value_index,
             } else .{
                 .doc_with_directive = .{
-                    .value = value_index,
+                    .maybe_node = value_index,
                     .directive = directive.?,
                 },
             },
@@ -521,7 +521,7 @@ pub const Parser = struct {
 
             try entries.append(gpa, .{
                 .key = key_pos,
-                .value = value_index,
+                .maybe_node = value_index,
             });
         }
 
@@ -541,7 +541,7 @@ pub const Parser = struct {
                 .tag = .map_single,
                 .data = .{ .map = .{
                     .key = entry.key,
-                    .value = entry.value,
+                    .maybe_node = entry.maybe_node,
                 } },
             });
         } else {
@@ -596,7 +596,7 @@ pub const Parser = struct {
             const value_index = try self.value();
             if (value_index == .none) return error.MalformedYaml;
 
-            try values.append(gpa, .{ .value = value_index.unwrap().? });
+            try values.append(gpa, .{ .node = value_index.unwrap().? });
         }
 
         const node_end: Token.Index = @enumFromInt(@intFromEnum(self.token_it.pos) - 1);
@@ -636,7 +636,7 @@ pub const Parser = struct {
             const value_index = try self.value();
             if (value_index == .none) return error.MalformedYaml;
 
-            try values.append(gpa, .{ .value = value_index.unwrap().? });
+            try values.append(gpa, .{ .node = value_index.unwrap().? });
         };
 
         log.debug("(list) end {s}@{d}", .{ @tagName(self.getToken(node_end).id), node_end });
@@ -663,13 +663,13 @@ pub const Parser = struct {
             1 => {
                 self.nodes.set(index, .{
                     .tag = .list_one,
-                    .data = .{ .value = values[0].value },
+                    .data = .{ .node = values[0].node },
                 });
             },
             2 => {
                 self.nodes.set(index, .{ .tag = .list_two, .data = .{ .list = .{
-                    .el1 = values[0].value,
-                    .el2 = values[1].value,
+                    .el1 = values[0].node,
+                    .el2 = values[1].node,
                 } } });
             },
             else => {

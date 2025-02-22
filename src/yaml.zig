@@ -158,13 +158,13 @@ pub const Value = union(enum) {
         const tag = tree.nodeTag(node_index);
         switch (tag) {
             .doc => {
-                const inner = tree.nodeData(node_index).maybe_value.unwrap() orelse
+                const inner = tree.nodeData(node_index).maybe_node.unwrap() orelse
                     // empty doc
                     return Value{ .empty = {} };
                 return Value.fromNode(arena, tree, inner);
             },
             .doc_with_directive => {
-                const inner = tree.nodeData(node_index).doc_with_directive.value.unwrap() orelse
+                const inner = tree.nodeData(node_index).doc_with_directive.maybe_node.unwrap() orelse
                     // empty doc
                     return Value{ .empty = {} };
                 return Value.fromNode(arena, tree, inner);
@@ -182,7 +182,7 @@ pub const Value = union(enum) {
                 if (gop.found_existing) {
                     return error.DuplicateMapKey;
                 }
-                const value = if (entry.value.unwrap()) |value|
+                const value = if (entry.maybe_node.unwrap()) |value|
                     try Value.fromNode(arena, tree, value)
                 else
                     .empty;
@@ -209,7 +209,7 @@ pub const Value = union(enum) {
                     if (gop.found_existing) {
                         return error.DuplicateMapKey;
                     }
-                    const value = if (entry.data.value.unwrap()) |value|
+                    const value = if (entry.data.maybe_node.unwrap()) |value|
                         try Value.fromNode(arena, tree, value)
                     else
                         .empty;
@@ -222,7 +222,7 @@ pub const Value = union(enum) {
                 return Value{ .list = &.{} };
             },
             .list_one => {
-                const value_index = tree.nodeData(node_index).value;
+                const value_index = tree.nodeData(node_index).node;
 
                 var out_list = std.ArrayList(Value).init(arena);
                 try out_list.ensureTotalCapacityPrecise(1);
@@ -257,7 +257,7 @@ pub const Value = union(enum) {
                     const elem = tree.extraData(parse_util.List.Entry, extra_end);
                     extra_end = elem.end;
 
-                    const value = try Value.fromNode(arena, tree, elem.data.value);
+                    const value = try Value.fromNode(arena, tree, elem.data.node);
                     out_list.appendAssumeCapacity(value);
                 }
 
