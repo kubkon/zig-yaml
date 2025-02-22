@@ -3,6 +3,7 @@ const mem = std.mem;
 const testing = std.testing;
 
 const Allocator = mem.Allocator;
+const Arena = std.heap.ArenaAllocator;
 const Yaml = @import("yaml").Yaml;
 
 const gpa = testing.allocator;
@@ -55,9 +56,12 @@ test "simple" {
     };
 
     var parsed = try loadFromFile("test/simple.yaml");
-    defer parsed.deinit();
+    defer parsed.deinit(gpa);
 
-    const result = try parsed.parse(Simple);
+    var arena = Arena.init(gpa);
+    defer arena.deinit();
+
+    const result = try parsed.parse(arena.allocator(), Simple);
     const expected = Simple{
         .names = &[_][]const u8{ "John Doe", "MacIntosh", "Jane Austin" },
         .numbers = &[_]i16{ 10, -8, 6 },
@@ -183,9 +187,12 @@ const LibTbd = struct {
 
 test "single lib tbd" {
     var parsed = try loadFromFile("test/single_lib.tbd");
-    defer parsed.deinit();
+    defer parsed.deinit(gpa);
 
-    const result = try parsed.parse(LibTbd);
+    var arena = Arena.init(gpa);
+    defer arena.deinit();
+
+    const result = try parsed.parse(arena.allocator(), LibTbd);
     const expected = LibTbd{
         .tbd_version = 4,
         .targets = &[_][]const u8{
@@ -256,9 +263,12 @@ test "single lib tbd" {
 
 test "multi lib tbd" {
     var parsed = try loadFromFile("test/multi_lib.tbd");
-    defer parsed.deinit();
+    defer parsed.deinit(gpa);
 
-    const result = try parsed.parse([]LibTbd);
+    var arena = Arena.init(gpa);
+    defer arena.deinit();
+
+    const result = try parsed.parse(arena.allocator(), []LibTbd);
     const expected = &[_]LibTbd{
         .{
             .tbd_version = 4,

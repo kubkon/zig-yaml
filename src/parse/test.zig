@@ -70,11 +70,11 @@ test "explicit doc" {
         \\...
     ;
 
-    var parser: Parser = .{ .allocator = testing.allocator, .source = source };
-    defer parser.deinit();
-    try parser.parse();
+    var parser: Parser = .{ .source = source };
+    defer parser.deinit(testing.allocator);
+    try parser.parse(testing.allocator);
 
-    var tree = try parser.toOwnedTree();
+    var tree = try parser.toOwnedTree(testing.allocator);
     defer tree.deinit(testing.allocator);
 
     try testing.expectEqual(1, tree.docs.len);
@@ -112,11 +112,11 @@ test "leaf in quotes" {
         \\key3: "double quoted"
     ;
 
-    var parser: Parser = .{ .allocator = testing.allocator, .source = source };
-    defer parser.deinit();
-    try parser.parse();
+    var parser: Parser = .{ .source = source };
+    defer parser.deinit(testing.allocator);
+    try parser.parse(testing.allocator);
 
-    var tree = try parser.toOwnedTree();
+    var tree = try parser.toOwnedTree(testing.allocator);
     defer tree.deinit(testing.allocator);
 
     try testing.expectEqual(1, tree.docs.len);
@@ -155,11 +155,11 @@ test "nested maps" {
         \\key2   : value2
     ;
 
-    var parser: Parser = .{ .allocator = testing.allocator, .source = source };
-    defer parser.deinit();
-    try parser.parse();
+    var parser: Parser = .{ .source = source };
+    defer parser.deinit(testing.allocator);
+    try parser.parse(testing.allocator);
 
-    var tree = try parser.toOwnedTree();
+    var tree = try parser.toOwnedTree(testing.allocator);
     defer tree.deinit(testing.allocator);
 
     try testing.expectEqual(1, tree.docs.len);
@@ -216,11 +216,11 @@ test "map of list of values" {
         \\  - 2
     ;
 
-    var parser: Parser = .{ .allocator = testing.allocator, .source = source };
-    defer parser.deinit();
-    try parser.parse();
+    var parser: Parser = .{ .source = source };
+    defer parser.deinit(testing.allocator);
+    try parser.parse(testing.allocator);
 
-    var tree = try parser.toOwnedTree();
+    var tree = try parser.toOwnedTree(testing.allocator);
     defer tree.deinit(testing.allocator);
 
     try testing.expectEqual(1, tree.docs.len);
@@ -273,11 +273,11 @@ test "map of list of maps" {
         \\- key4 : value4
     ;
 
-    var parser: Parser = .{ .allocator = testing.allocator, .source = source };
-    defer parser.deinit();
-    try parser.parse();
+    var parser: Parser = .{ .source = source };
+    defer parser.deinit(testing.allocator);
+    try parser.parse(testing.allocator);
 
-    var tree = try parser.toOwnedTree();
+    var tree = try parser.toOwnedTree(testing.allocator);
     defer tree.deinit(testing.allocator);
 
     try testing.expectEqual(1, tree.docs.len);
@@ -333,11 +333,11 @@ test "map of list of maps with inner list" {
         \\       - name: inner-bar
     ;
 
-    var parser: Parser = .{ .allocator = testing.allocator, .source = source };
-    defer parser.deinit();
-    try parser.parse();
+    var parser: Parser = .{ .source = source };
+    defer parser.deinit(testing.allocator);
+    try parser.parse(testing.allocator);
 
-    var tree = try parser.toOwnedTree();
+    var tree = try parser.toOwnedTree(testing.allocator);
     defer tree.deinit(testing.allocator);
 
     try testing.expectEqual(1, tree.docs.len);
@@ -433,11 +433,11 @@ test "list of lists" {
         \\- [Sammy Sosa   , 63, 0.288]
     ;
 
-    var parser: Parser = .{ .allocator = testing.allocator, .source = source };
-    defer parser.deinit();
-    try parser.parse();
+    var parser: Parser = .{ .source = source };
+    defer parser.deinit(testing.allocator);
+    try parser.parse(testing.allocator);
 
-    var tree = try parser.toOwnedTree();
+    var tree = try parser.toOwnedTree(testing.allocator);
     defer tree.deinit(testing.allocator);
 
     try testing.expectEqual(1, tree.docs.len);
@@ -519,11 +519,11 @@ test "inline list" {
         \\[name        , hr, avg  ]
     ;
 
-    var parser: Parser = .{ .allocator = testing.allocator, .source = source };
-    defer parser.deinit();
-    try parser.parse();
+    var parser: Parser = .{ .source = source };
+    defer parser.deinit(testing.allocator);
+    try parser.parse(testing.allocator);
 
-    var tree = try parser.toOwnedTree();
+    var tree = try parser.toOwnedTree(testing.allocator);
     defer tree.deinit(testing.allocator);
 
     try testing.expectEqual(1, tree.docs.len);
@@ -559,11 +559,11 @@ test "inline list as mapping value" {
         \\        hr, avg  ]
     ;
 
-    var parser: Parser = .{ .allocator = testing.allocator, .source = source };
-    defer parser.deinit();
-    try parser.parse();
+    var parser: Parser = .{ .source = source };
+    defer parser.deinit(testing.allocator);
+    try parser.parse(testing.allocator);
 
-    var tree = try parser.toOwnedTree();
+    var tree = try parser.toOwnedTree(testing.allocator);
     defer tree.deinit(testing.allocator);
 
     try testing.expectEqual(1, tree.docs.len);
@@ -607,15 +607,15 @@ test "inline list as mapping value" {
 }
 
 fn parseSuccess(comptime source: []const u8) !void {
-    var parser: Parser = .{ .allocator = testing.allocator, .source = source };
-    defer parser.deinit();
-    try parser.parse();
+    var parser: Parser = .{ .source = source };
+    defer parser.deinit(testing.allocator);
+    try parser.parse(testing.allocator);
 }
 
 fn parseError(comptime source: []const u8, err: parse.ParseError) !void {
-    var parser: Parser = .{ .allocator = testing.allocator, .source = source };
-    defer parser.deinit();
-    try testing.expectError(err, parser.parse());
+    var parser: Parser = .{ .source = source };
+    defer parser.deinit(testing.allocator);
+    try testing.expectError(err, parser.parse(testing.allocator));
 }
 
 test "empty doc with spaces and comments" {

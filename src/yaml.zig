@@ -29,7 +29,7 @@ pub const StringifyError = error{
 } || YamlError || std.fs.File.WriteError;
 
 pub const List = []Value;
-pub const Map = std.StringArrayHashMap(Value);
+pub const Map = std.StringArrayHashMapUnmanaged(Value);
 
 pub const Value = union(enum) {
     empty,
@@ -39,6 +39,26 @@ pub const Value = union(enum) {
     string: []const u8,
     list: List,
     map: Map,
+
+    pub fn deinit(self: *Value, gpa: Allocator) void {
+        switch (self.*) {
+            .string => |string| gpa.free(string),
+            .list => |list| {
+                for (list) |*value| {
+                    value.deinit(gpa);
+                }
+                gpa.free(list);
+            },
+            .map => |*map| {
+                for (map.keys(), map.values()) |key, *value| {
+                    gpa.free(key);
+                    value.deinit(gpa);
+                }
+                map.deinit(gpa);
+            },
+            .empty, .int, .float, .boolean => {},
+        }
+    }
 
     pub fn asInt(self: Value) !i64 {
         if (self != .int) return error.TypeMismatch;
@@ -154,36 +174,38 @@ pub const Value = union(enum) {
         };
     }
 
-    fn fromNode(arena: Allocator, tree: Tree, node_index: Node.Index) YamlError!Value {
+    fn fromNode(gpa: Allocator, tree: Tree, node_index: Node.Index) YamlError!Value {
         const tag = tree.nodeTag(node_index);
         switch (tag) {
             .doc => {
                 const inner = tree.nodeData(node_index).maybe_node.unwrap() orelse
                     // empty doc
                     return Value{ .empty = {} };
-                return Value.fromNode(arena, tree, inner);
+                return Value.fromNode(gpa, tree, inner);
             },
             .doc_with_directive => {
                 const inner = tree.nodeData(node_index).doc_with_directive.maybe_node.unwrap() orelse
                     // empty doc
                     return Value{ .empty = {} };
-                return Value.fromNode(arena, tree, inner);
+                return Value.fromNode(gpa, tree, inner);
             },
             .map_single => {
                 const entry = tree.nodeData(node_index).map;
 
                 // TODO use ContextAdapted HashMap and do not duplicate keys, intern
                 // in a contiguous string buffer.
-                var out_map = std.StringArrayHashMap(Value).init(arena);
-                try out_map.ensureTotalCapacity(1);
+                var out_map: Map = .empty;
+                errdefer out_map.deinit(gpa);
+                try out_map.ensureTotalCapacity(gpa, 1);
 
-                const key = try arena.dupe(u8, tree.rawString(entry.key, entry.key));
+                const key = try gpa.dupe(u8, tree.rawString(entry.key, entry.key));
+                errdefer gpa.free(key);
+
                 const gop = out_map.getOrPutAssumeCapacity(key);
-                if (gop.found_existing) {
-                    return error.DuplicateMapKey;
-                }
+                if (gop.found_existing) return error.DuplicateMapKey;
+
                 const value = if (entry.maybe_node.unwrap()) |value|
-                    try Value.fromNode(arena, tree, value)
+                    try Value.fromNode(gpa, tree, value)
                 else
                     .empty;
                 gop.value_ptr.* = value;
@@ -196,21 +218,29 @@ pub const Value = union(enum) {
 
                 // TODO use ContextAdapted HashMap and do not duplicate keys, intern
                 // in a contiguous string buffer.
-                var out_map = std.StringArrayHashMap(Value).init(arena);
-                try out_map.ensureTotalCapacity(map.data.map_len);
+                var out_map: Map = .empty;
+                errdefer {
+                    for (out_map.keys(), out_map.values()) |key, *value| {
+                        gpa.free(key);
+                        value.deinit(gpa);
+                    }
+                    out_map.deinit(gpa);
+                }
+                try out_map.ensureTotalCapacity(gpa, map.data.map_len);
 
                 var extra_end = map.end;
                 for (0..map.data.map_len) |_| {
                     const entry = tree.extraData(parse_util.Map.Entry, extra_end);
                     extra_end = entry.end;
 
-                    const key = try arena.dupe(u8, tree.rawString(entry.data.key, entry.data.key));
+                    const key = try gpa.dupe(u8, tree.rawString(entry.data.key, entry.data.key));
+                    errdefer gpa.free(key);
+
                     const gop = out_map.getOrPutAssumeCapacity(key);
-                    if (gop.found_existing) {
-                        return error.DuplicateMapKey;
-                    }
+                    if (gop.found_existing) return error.DuplicateMapKey;
+
                     const value = if (entry.data.maybe_node.unwrap()) |value|
-                        try Value.fromNode(arena, tree, value)
+                        try Value.fromNode(gpa, tree, value)
                     else
                         .empty;
                     gop.value_ptr.* = value;
@@ -224,44 +254,54 @@ pub const Value = union(enum) {
             .list_one => {
                 const value_index = tree.nodeData(node_index).node;
 
-                var out_list = std.ArrayList(Value).init(arena);
-                try out_list.ensureTotalCapacityPrecise(1);
+                var out_list: std.ArrayListUnmanaged(Value) = .empty;
+                defer out_list.deinit(gpa);
+                try out_list.ensureTotalCapacityPrecise(gpa, 1);
 
-                const value = try Value.fromNode(arena, tree, value_index);
+                var value = try Value.fromNode(gpa, tree, value_index);
+                errdefer value.deinit(gpa);
                 out_list.appendAssumeCapacity(value);
 
-                return Value{ .list = try out_list.toOwnedSlice() };
+                return Value{ .list = try out_list.toOwnedSlice(gpa) };
             },
             .list_two => {
                 const list = tree.nodeData(node_index).list;
 
-                var out_list = std.ArrayList(Value).init(arena);
-                try out_list.ensureTotalCapacityPrecise(2);
+                var out_list: std.ArrayListUnmanaged(Value) = .empty;
+                errdefer for (out_list.items) |*value| {
+                    value.deinit(gpa);
+                };
+                defer out_list.deinit(gpa);
+                try out_list.ensureTotalCapacityPrecise(gpa, 2);
 
                 for (&[2]Node.Index{ list.el1, list.el2 }) |value_index| {
-                    const value = try Value.fromNode(arena, tree, value_index);
+                    const value = try Value.fromNode(gpa, tree, value_index);
                     out_list.appendAssumeCapacity(value);
                 }
 
-                return Value{ .list = try out_list.toOwnedSlice() };
+                return Value{ .list = try out_list.toOwnedSlice(gpa) };
             },
             .list_many => {
                 const extra_index = tree.nodeData(node_index).extra;
                 const list = tree.extraData(parse_util.List, extra_index);
 
-                var out_list = std.ArrayList(Value).init(arena);
-                try out_list.ensureTotalCapacityPrecise(list.data.list_len);
+                var out_list: std.ArrayListUnmanaged(Value) = .empty;
+                errdefer for (out_list.items) |*value| {
+                    value.deinit(gpa);
+                };
+                defer out_list.deinit(gpa);
+                try out_list.ensureTotalCapacityPrecise(gpa, list.data.list_len);
 
                 var extra_end = list.end;
                 for (0..list.data.list_len) |_| {
                     const elem = tree.extraData(parse_util.List.Entry, extra_end);
                     extra_end = elem.end;
 
-                    const value = try Value.fromNode(arena, tree, elem.data.node);
+                    const value = try Value.fromNode(gpa, tree, elem.data.node);
                     out_list.appendAssumeCapacity(value);
                 }
 
-                return Value{ .list = try out_list.toOwnedSlice() };
+                return Value{ .list = try out_list.toOwnedSlice(gpa) };
             },
             .value, .string_value => {
                 const raw = raw: switch (tag) {
@@ -287,7 +327,9 @@ pub const Value = union(enum) {
                 }
 
                 if (raw.len <= 5 and raw.len > 0) {
-                    const lower_raw = try std.ascii.allocLowerString(arena, raw);
+                    const lower_raw = try std.ascii.allocLowerString(gpa, raw);
+                    defer gpa.free(lower_raw);
+
                     for (supportedTruthyBooleanValue) |v| {
                         if (std.mem.eql(u8, v, lower_raw)) {
                             return Value{ .boolean = true };
@@ -301,7 +343,7 @@ pub const Value = union(enum) {
                     }
                 }
 
-                return Value{ .string = try arena.dupe(u8, raw) };
+                return Value{ .string = try gpa.dupe(u8, raw) };
             },
         }
     }
@@ -315,9 +357,8 @@ pub const Value = union(enum) {
             .float => return Value{ .float = math.lossyCast(f64, input) },
 
             .@"struct" => |info| if (info.is_tuple) {
-                var list = std.ArrayList(Value).init(arena);
-                errdefer list.deinit();
-                try list.ensureTotalCapacityPrecise(info.fields.len);
+                var list: std.ArrayListUnmanaged(Value) = .empty;
+                try list.ensureTotalCapacityPrecise(arena, info.fields.len);
 
                 inline for (info.fields) |field| {
                     if (try encode(arena, @field(input, field.name))) |value| {
@@ -325,11 +366,10 @@ pub const Value = union(enum) {
                     }
                 }
 
-                return Value{ .list = try list.toOwnedSlice() };
+                return Value{ .list = try list.toOwnedSlice(arena) };
             } else {
-                var map = Map.init(arena);
-                errdefer map.deinit();
-                try map.ensureTotalCapacity(info.fields.len);
+                var map: Map = .empty;
+                try map.ensureTotalCapacity(arena, info.fields.len);
 
                 inline for (info.fields) |field| {
                     if (try encode(arena, @field(input, field.name))) |value| {
@@ -366,9 +406,8 @@ pub const Value = union(enum) {
                         return Value{ .string = try arena.dupe(u8, input) };
                     }
 
-                    var list = std.ArrayList(Value).init(arena);
-                    errdefer list.deinit();
-                    try list.ensureTotalCapacityPrecise(input.len);
+                    var list: std.ArrayListUnmanaged(Value) = .empty;
+                    try list.ensureTotalCapacityPrecise(arena, input.len);
 
                     for (input) |elem| {
                         if (try encode(arena, elem)) |value| {
@@ -379,7 +418,7 @@ pub const Value = union(enum) {
                         }
                     }
 
-                    return Value{ .list = try list.toOwnedSlice() };
+                    return Value{ .list = try list.toOwnedSlice(arena) };
                 },
                 else => {
                     @compileError("Unhandled type: {s}" ++ @typeName(@TypeOf(input)));
@@ -400,38 +439,35 @@ pub const Value = union(enum) {
 };
 
 pub const Yaml = struct {
-    gpa: Allocator,
-    arena: ArenaAllocator,
-    docs: std.ArrayList(Value),
+    docs: std.ArrayListUnmanaged(Value) = .empty,
     tree: Tree = undefined,
 
-    pub fn deinit(self: *Yaml) void {
-        self.tree.deinit(self.gpa);
-        self.arena.deinit();
+    pub fn deinit(self: *Yaml, gpa: Allocator) void {
+        for (self.docs.items) |*value| {
+            value.deinit(gpa);
+        }
+        self.docs.deinit(gpa);
+        self.tree.deinit(gpa);
     }
 
-    pub fn load(allocator: Allocator, source: []const u8) !Yaml {
-        var arena = ArenaAllocator.init(allocator);
-        errdefer arena.deinit();
+    pub fn load(gpa: Allocator, source: []const u8) !Yaml {
+        var parser: Parser = .{ .source = source };
+        defer parser.deinit(gpa);
+        try parser.parse(gpa);
 
-        var parser: Parser = .{ .allocator = allocator, .source = source };
-        defer parser.deinit();
-        try parser.parse();
+        var tree = try parser.toOwnedTree(gpa);
+        errdefer tree.deinit(gpa);
 
-        var tree = try parser.toOwnedTree();
-        errdefer tree.deinit(allocator);
-
-        var docs = std.ArrayList(Value).init(arena.allocator());
-        try docs.ensureTotalCapacityPrecise(tree.docs.len);
+        var docs: std.ArrayListUnmanaged(Value) = .empty;
+        errdefer docs.deinit(gpa);
+        try docs.ensureTotalCapacityPrecise(gpa, tree.docs.len);
 
         for (tree.docs) |node| {
-            const value = try Value.fromNode(arena.allocator(), tree, node);
+            const value = try Value.fromNode(gpa, tree, node);
             docs.appendAssumeCapacity(value);
         }
 
         return Yaml{
-            .gpa = allocator,
-            .arena = arena,
             .tree = tree,
             .docs = docs,
         };
@@ -448,30 +484,30 @@ pub const Yaml = struct {
         OutOfMemory,
     };
 
-    pub fn parse(self: *Yaml, comptime T: type) Error!T {
+    pub fn parse(self: Yaml, arena: Allocator, comptime T: type) Error!T {
         if (self.docs.items.len == 0) {
             if (@typeInfo(T) == .void) return {};
             return error.TypeMismatch;
         }
 
         if (self.docs.items.len == 1) {
-            return self.parseValue(T, self.docs.items[0]);
+            return self.parseValue(arena, T, self.docs.items[0]);
         }
 
         switch (@typeInfo(T)) {
             .array => |info| {
                 var parsed: T = undefined;
                 for (self.docs.items, 0..) |doc, i| {
-                    parsed[i] = try self.parseValue(info.child, doc);
+                    parsed[i] = try self.parseValue(arena, info.child, doc);
                 }
                 return parsed;
             },
             .pointer => |info| {
                 switch (info.size) {
                     .slice => {
-                        var parsed = try self.arena.allocator().alloc(info.child, self.docs.items.len);
+                        var parsed = try arena.alloc(info.child, self.docs.items.len);
                         for (self.docs.items, 0..) |doc, i| {
-                            parsed[i] = try self.parseValue(info.child, doc);
+                            parsed[i] = try self.parseValue(arena, info.child, doc);
                         }
                         return parsed;
                     },
@@ -483,7 +519,7 @@ pub const Yaml = struct {
         }
     }
 
-    fn parseValue(self: *Yaml, comptime T: type, value: Value) Error!T {
+    fn parseValue(self: Yaml, arena: Allocator, comptime T: type, value: Value) Error!T {
         return switch (@typeInfo(T)) {
             .int => math.cast(T, try value.asInt()) orelse return error.Overflow,
             .bool => self.parseBoolean(bool, value),
@@ -492,13 +528,13 @@ pub const Yaml = struct {
             } else |_| {
                 return math.lossyCast(T, try value.asInt());
             },
-            .@"struct" => self.parseStruct(T, try value.asMap()),
-            .@"union" => self.parseUnion(T, value),
-            .array => self.parseArray(T, try value.asList()),
+            .@"struct" => self.parseStruct(arena, T, try value.asMap()),
+            .@"union" => self.parseUnion(arena, T, value),
+            .array => self.parseArray(arena, T, try value.asList()),
             .pointer => if (value.asList()) |list| {
-                return self.parsePointer(T, .{ .list = list });
+                return self.parsePointer(arena, T, .{ .list = list });
             } else |_| {
-                return self.parsePointer(T, .{ .string = try value.asString() });
+                return self.parsePointer(arena, T, .{ .string = try value.asString() });
             },
             .void => error.TypeMismatch,
             .optional => unreachable,
@@ -506,17 +542,17 @@ pub const Yaml = struct {
         };
     }
 
-    fn parseBoolean(self: *Yaml, comptime T: type, value: Value) Error!T {
+    fn parseBoolean(self: Yaml, comptime T: type, value: Value) Error!T {
         _ = self;
         return value.asBool();
     }
 
-    fn parseUnion(self: *Yaml, comptime T: type, value: Value) Error!T {
+    fn parseUnion(self: Yaml, arena: Allocator, comptime T: type, value: Value) Error!T {
         const union_info = @typeInfo(T).@"union";
 
         if (union_info.tag_type) |_| {
             inline for (union_info.fields) |field| {
-                if (self.parseValue(field.type, value)) |u_value| {
+                if (self.parseValue(arena, field.type, value)) |u_value| {
                     return @unionInit(T, field.name, u_value);
                 } else |err| switch (err) {
                     error.TypeMismatch => {},
@@ -529,24 +565,24 @@ pub const Yaml = struct {
         return error.UnionTagMissing;
     }
 
-    fn parseOptional(self: *Yaml, comptime T: type, value: ?Value) Error!T {
+    fn parseOptional(self: Yaml, arena: Allocator, comptime T: type, value: ?Value) Error!T {
         const unwrapped = value orelse return null;
         const opt_info = @typeInfo(T).optional;
-        return @as(T, try self.parseValue(opt_info.child, unwrapped));
+        return @as(T, try self.parseValue(arena, opt_info.child, unwrapped));
     }
 
-    fn parseStruct(self: *Yaml, comptime T: type, map: Map) Error!T {
+    fn parseStruct(self: Yaml, arena: Allocator, comptime T: type, map: Map) Error!T {
         const struct_info = @typeInfo(T).@"struct";
         var parsed: T = undefined;
 
         inline for (struct_info.fields) |field| {
             const value: ?Value = map.get(field.name) orelse blk: {
-                const field_name = try mem.replaceOwned(u8, self.arena.allocator(), field.name, "_", "-");
+                const field_name = try mem.replaceOwned(u8, arena, field.name, "_", "-");
                 break :blk map.get(field_name);
             };
 
             if (@typeInfo(field.type) == .optional) {
-                @field(parsed, field.name) = try self.parseOptional(field.type, value);
+                @field(parsed, field.name) = try self.parseOptional(arena, field.type, value);
                 continue;
             }
 
@@ -554,15 +590,14 @@ pub const Yaml = struct {
                 log.debug("missing struct field: {s}: {s}", .{ field.name, @typeName(field.type) });
                 return error.StructFieldMissing;
             };
-            @field(parsed, field.name) = try self.parseValue(field.type, unwrapped);
+            @field(parsed, field.name) = try self.parseValue(arena, field.type, unwrapped);
         }
 
         return parsed;
     }
 
-    fn parsePointer(self: *Yaml, comptime T: type, value: Value) Error!T {
+    fn parsePointer(self: Yaml, arena: Allocator, comptime T: type, value: Value) Error!T {
         const ptr_info = @typeInfo(T).pointer;
-        const arena = self.arena.allocator();
 
         switch (ptr_info.size) {
             .slice => {
@@ -572,7 +607,7 @@ pub const Yaml = struct {
 
                 var parsed = try arena.alloc(ptr_info.child, value.list.len);
                 for (value.list, 0..) |elem, i| {
-                    parsed[i] = try self.parseValue(ptr_info.child, elem);
+                    parsed[i] = try self.parseValue(arena, ptr_info.child, elem);
                 }
                 return parsed;
             },
@@ -580,13 +615,13 @@ pub const Yaml = struct {
         }
     }
 
-    fn parseArray(self: *Yaml, comptime T: type, list: List) Error!T {
+    fn parseArray(self: Yaml, arena: Allocator, comptime T: type, list: List) Error!T {
         const array_info = @typeInfo(T).array;
         if (array_info.len != list.len) return error.ArraySizeMismatch;
 
         var parsed: T = undefined;
         for (list, 0..) |elem, i| {
-            parsed[i] = try self.parseValue(array_info.child, elem);
+            parsed[i] = try self.parseValue(arena, array_info.child, elem);
         }
 
         return parsed;
@@ -606,8 +641,8 @@ pub const Yaml = struct {
     }
 };
 
-pub fn stringify(allocator: Allocator, input: anytype, writer: anytype) StringifyError!void {
-    var arena = ArenaAllocator.init(allocator);
+pub fn stringify(gpa: Allocator, input: anytype, writer: anytype) StringifyError!void {
+    var arena = ArenaAllocator.init(gpa);
     defer arena.deinit();
 
     const maybe_value = try Value.encode(arena.allocator(), input);

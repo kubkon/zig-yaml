@@ -72,7 +72,7 @@ const source =
 
 ```zig
 var untyped = try yaml.Yaml.load(std.testing.allocator, source);
-defer untyped.deinit();
+defer untyped.deinit(std.testing.allocator);
 
 try std.testing.expectEqual(untyped.docs.items.len, 1);
 
@@ -85,7 +85,7 @@ try std.testing.expectEqual(map.get("names").?.list.len, 3);
 
 ```zig
 var typed = try yaml.Yaml.load(std.testing.allocator, source);
-defer typed.deinit();
+defer typed.deinit(std.testing.allocator);
 
 const Simple = struct {
     names: []const []const u8,
@@ -97,7 +97,10 @@ const Simple = struct {
     finally: [4]f16,
 };
 
-const simple = try typed.parse(Simple);
+var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+defer arena.deinit();
+
+const simple = try typed.parse(arena.allocator(), Simple);
 try std.testing.expectEqual(simple.names.len, 3);
 ```
 

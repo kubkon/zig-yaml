@@ -261,17 +261,15 @@ pub const Tree = struct {
 };
 
 pub const Parser = struct {
-    allocator: Allocator,
     source: []const u8,
-    tokens: std.MultiArrayList(TokenWithLineCol) = .{},
+    tokens: std.MultiArrayList(TokenWithLineCol) = .empty,
     token_it: TokenIterator = undefined,
     docs: std.ArrayListUnmanaged(Node.Index) = .empty,
     nodes: std.MultiArrayList(Node) = .empty,
     extra: std.ArrayListUnmanaged(u32) = .empty,
     string_bytes: std.ArrayListUnmanaged(u8) = .empty,
 
-    pub fn deinit(self: *Parser) void {
-        const gpa = self.allocator;
+    pub fn deinit(self: *Parser, gpa: Allocator) void {
         self.tokens.deinit(gpa);
         self.docs.deinit(gpa);
         self.nodes.deinit(gpa);
@@ -280,9 +278,7 @@ pub const Parser = struct {
         self.* = undefined;
     }
 
-    pub fn parse(self: *Parser) ParseError!void {
-        const gpa = self.allocator;
-
+    pub fn parse(self: *Parser, gpa: Allocator) ParseError!void {
         var tokenizer = Tokenizer{ .buffer = self.source };
         var line: usize = 0;
         var prev_line_last_col: usize = 0;
@@ -323,15 +319,14 @@ pub const Parser = struct {
                 .eof => break,
                 else => {
                     self.token_it.seekBy(-1);
-                    const node_index = try self.doc();
+                    const node_index = try self.doc(gpa);
                     try self.docs.append(gpa, node_index);
                 },
             }
         }
     }
 
-    pub fn toOwnedTree(self: *Parser) Allocator.Error!Tree {
-        const gpa = self.allocator;
+    pub fn toOwnedTree(self: *Parser, gpa: Allocator) Allocator.Error!Tree {
         return .{
             .source = self.source,
             .tokens = self.tokens.toOwnedSlice(),
@@ -342,17 +337,16 @@ pub const Parser = struct {
         };
     }
 
-    fn addString(self: *Parser, string: []const u8) Allocator.Error!String {
-        const gpa = self.allocator;
+    fn addString(self: *Parser, gpa: Allocator, string: []const u8) Allocator.Error!String {
         const index: u32 = @intCast(self.string_bytes.items.len);
         try self.string_bytes.ensureUnusedCapacity(gpa, string.len);
         self.string_bytes.appendSliceAssumeCapacity(string);
         return .{ .index = @enumFromInt(index), .len = @intCast(string.len) };
     }
 
-    fn addExtra(self: *Parser, extra: anytype) Allocator.Error!u32 {
+    fn addExtra(self: *Parser, gpa: Allocator, extra: anytype) Allocator.Error!u32 {
         const fields = std.meta.fields(@TypeOf(extra));
-        try self.extra.ensureUnusedCapacity(self.gpa, fields.len);
+        try self.extra.ensureUnusedCapacity(gpa, fields.len);
         return self.addExtraAssumeCapacity(extra);
     }
 
@@ -376,7 +370,7 @@ pub const Parser = struct {
         return result;
     }
 
-    fn value(self: *Parser) ParseError!Node.OptionalIndex {
+    fn value(self: *Parser, gpa: Allocator) ParseError!Node.OptionalIndex {
         self.eatCommentsAndSpace(&.{});
 
         const pos = self.token_it.pos;
@@ -388,33 +382,32 @@ pub const Parser = struct {
             .literal => if (self.eatToken(.map_value_ind, &.{ .new_line, .comment })) |_| {
                 // map
                 self.token_it.seekTo(pos);
-                return self.map();
+                return self.map(gpa);
             } else {
                 // leaf value
                 self.token_it.seekTo(pos);
-                return self.leafValue();
+                return self.leafValue(gpa);
             },
             .single_quoted, .double_quoted => {
                 // leaf value
                 self.token_it.seekBy(-1);
-                return self.leafValue();
+                return self.leafValue(gpa);
             },
             .seq_item_ind => {
                 // list
                 self.token_it.seekBy(-1);
-                return self.list();
+                return self.list(gpa);
             },
             .flow_seq_start => {
                 // list
                 self.token_it.seekBy(-1);
-                return self.listBracketed();
+                return self.listBracketed(gpa);
             },
             else => return .none,
         }
     }
 
-    fn doc(self: *Parser) ParseError!Node.Index {
-        const gpa = self.allocator;
+    fn doc(self: *Parser, gpa: Allocator) ParseError!Node.Index {
         const node_index = try self.nodes.addOne(gpa);
         const node_start = self.token_it.pos;
 
@@ -442,7 +435,7 @@ pub const Parser = struct {
         };
 
         // Parse value
-        const value_index = try self.value();
+        const value_index = try self.value(gpa);
         if (value_index == .none) {
             self.token_it.seekBy(-1);
         }
@@ -487,8 +480,7 @@ pub const Parser = struct {
         return @enumFromInt(node_index);
     }
 
-    fn map(self: *Parser) ParseError!Node.OptionalIndex {
-        const gpa = self.allocator;
+    fn map(self: *Parser, gpa: Allocator) ParseError!Node.OptionalIndex {
         const node_index = try self.nodes.addOne(gpa);
         const node_start = self.token_it.pos;
 
@@ -529,7 +521,7 @@ pub const Parser = struct {
             _ = try self.expectToken(.map_value_ind, &.{ .new_line, .comment });
 
             // Parse value
-            const value_index = try self.value();
+            const value_index = try self.value(gpa);
 
             if (value_index.unwrap()) |v| {
                 const value_start = self.nodes.items(.scope)[@intFromEnum(v)].start;
@@ -589,8 +581,7 @@ pub const Parser = struct {
         return @as(Node.Index, @enumFromInt(node_index)).toOptional();
     }
 
-    fn list(self: *Parser) ParseError!Node.OptionalIndex {
-        const gpa = self.allocator;
+    fn list(self: *Parser, gpa: Allocator) ParseError!Node.OptionalIndex {
         const node_index: Node.Index = @enumFromInt(try self.nodes.addOne(gpa));
         const node_start = self.token_it.pos;
 
@@ -619,7 +610,7 @@ pub const Parser = struct {
             //  an inner list will be parsed by self.value() so
             //  checking for  cur_col > first_col is not necessary here
 
-            const value_index = try self.value();
+            const value_index = try self.value(gpa);
             if (value_index == .none) return error.MalformedYaml;
 
             try values.append(gpa, .{ .node = value_index.unwrap().? });
@@ -637,8 +628,7 @@ pub const Parser = struct {
         return node_index.toOptional();
     }
 
-    fn listBracketed(self: *Parser) ParseError!Node.OptionalIndex {
-        const gpa = self.allocator;
+    fn listBracketed(self: *Parser, gpa: Allocator) ParseError!Node.OptionalIndex {
         const node_index: Node.Index = @enumFromInt(try self.nodes.addOne(gpa));
         const node_start = self.token_it.pos;
 
@@ -657,7 +647,7 @@ pub const Parser = struct {
 
             _ = self.eatToken(.comma, &.{.comment});
 
-            const value_index = try self.value();
+            const value_index = try self.value(gpa);
             if (value_index == .none) return error.MalformedYaml;
 
             try values.append(gpa, .{ .node = value_index.unwrap().? });
@@ -725,8 +715,7 @@ pub const Parser = struct {
         }
     }
 
-    fn leafValue(self: *Parser) ParseError!Node.OptionalIndex {
-        const gpa = self.allocator;
+    fn leafValue(self: *Parser, gpa: Allocator) ParseError!Node.OptionalIndex {
         const node_index: Node.Index = @enumFromInt(try self.nodes.addOne(gpa));
         const node_start = self.token_it.pos;
 
@@ -738,7 +727,7 @@ pub const Parser = struct {
                     const raw = self.rawString(node_start, node_end);
                     log.debug("(leaf) {s}", .{raw});
                     assert(raw.len > 0);
-                    const string = try self.parseSingleQuoted(raw);
+                    const string = try self.parseSingleQuoted(gpa, raw);
 
                     self.nodes.set(@intFromEnum(node_index), .{
                         .tag = .string_value,
@@ -756,7 +745,7 @@ pub const Parser = struct {
                     const raw = self.rawString(node_start, node_end);
                     log.debug("(leaf) {s}", .{raw});
                     assert(raw.len > 0);
-                    const string = try self.parseDoubleQuoted(raw);
+                    const string = try self.parseDoubleQuoted(gpa, raw);
 
                     self.nodes.set(@intFromEnum(node_index), .{
                         .tag = .string_value,
@@ -858,9 +847,7 @@ pub const Parser = struct {
         return self.tokens.items(.line_col)[@intFromEnum(index)].col;
     }
 
-    fn parseSingleQuoted(self: *Parser, raw: []const u8) ParseError!String {
-        const gpa = self.allocator;
-
+    fn parseSingleQuoted(self: *Parser, gpa: Allocator, raw: []const u8) ParseError!String {
         assert(raw[0] == '\'' and raw[raw.len - 1] == '\'');
         const raw_no_quotes = raw[1 .. raw.len - 1];
 
@@ -903,9 +890,7 @@ pub const Parser = struct {
         return string;
     }
 
-    fn parseDoubleQuoted(self: *Parser, raw: []const u8) ParseError!String {
-        const gpa = self.allocator;
-
+    fn parseDoubleQuoted(self: *Parser, gpa: Allocator, raw: []const u8) ParseError!String {
         assert(raw[0] == '"' and raw[raw.len - 1] == '"');
         const raw_no_quotes = raw[1 .. raw.len - 1];
 
