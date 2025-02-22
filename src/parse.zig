@@ -11,6 +11,7 @@ const TokenIterator = Tokenizer.TokenIterator;
 /// TODO for each Node we need to track start-end Tokens too.
 pub const Node = struct {
     tag: Tag,
+    scope: Scope,
     data: Data,
 
     pub const Tag = enum(u8) {
@@ -47,6 +48,11 @@ pub const Node = struct {
 
         /// Payload is string.
         value,
+    };
+
+    pub const Scope = struct {
+        start: Token.Index,
+        end: Token.Index,
     };
 
     pub const Data = union {
@@ -179,6 +185,10 @@ pub const Tree = struct {
         return tree.nodes.items(.data)[@intFromEnum(node)];
     }
 
+    pub fn nodeScope(tree: Tree, node: Node.Index) Node.Scope {
+        return tree.nodes.items(.scope)[@intFromEnum(node)];
+    }
+
     /// Returns the requested data, as well as the new index which is at the start of the
     /// trailers for the object.
     pub fn extraData(tree: Tree, comptime T: type, index: Extra) struct { data: T, end: Extra } {
@@ -230,20 +240,13 @@ pub const Parser = struct {
     line_cols: std.AutoHashMapUnmanaged(Token.Index, LineCol) = .empty,
     docs: std.ArrayListUnmanaged(Node.Index) = .empty,
     nodes: std.MultiArrayList(Node) = .empty,
-    nodes_scopes: std.AutoHashMapUnmanaged(Node.Index, Scope) = .empty,
     extra: std.ArrayListUnmanaged(u32) = .empty,
     string_bytes: std.ArrayListUnmanaged(u8) = .empty,
-
-    pub const Scope = struct {
-        start: Token.Index,
-        end: Token.Index,
-    };
 
     pub fn deinit(self: *Parser) void {
         const gpa = self.allocator;
         self.docs.deinit(gpa);
         self.nodes.deinit(gpa);
-        self.nodes_scopes.deinit(gpa);
         self.extra.deinit(gpa);
         self.string_bytes.deinit(gpa);
         self.line_cols.deinit(gpa);
@@ -445,6 +448,10 @@ pub const Parser = struct {
 
         self.nodes.set(node_index, .{
             .tag = if (directive == null) .doc else .doc_with_directive,
+            .scope = .{
+                .start = node_start,
+                .end = node_end,
+            },
             .data = if (directive == null) .{
                 .maybe_node = value_index,
             } else .{
@@ -453,11 +460,6 @@ pub const Parser = struct {
                     .directive = directive.?,
                 },
             },
-        });
-
-        try self.nodes_scopes.putNoClobber(gpa, @enumFromInt(node_index), .{
-            .start = node_start,
-            .end = node_end,
         });
 
         return @enumFromInt(node_index);
@@ -508,7 +510,7 @@ pub const Parser = struct {
             const value_index = try self.value();
 
             if (value_index.unwrap()) |v| {
-                const value_start = self.nodes_scopes.get(v).?.start;
+                const value_start = self.nodes.items(.scope)[@intFromEnum(v)].start;
                 if (self.getCol(value_start) < self.getCol(key_pos)) {
                     return error.MalformedYaml;
                 }
@@ -529,16 +531,17 @@ pub const Parser = struct {
 
         log.debug("(map) end {s}@{d}", .{ @tagName(self.getToken(node_end).id), node_end });
 
-        try self.nodes_scopes.putNoClobber(gpa, @enumFromInt(node_index), .{
+        const scope: Node.Scope = .{
             .start = node_start,
             .end = node_end,
-        });
+        };
 
         if (entries.items.len == 1) {
             const entry = entries.items[0];
 
             self.nodes.set(node_index, .{
                 .tag = .map_single,
+                .scope = scope,
                 .data = .{ .map = .{
                     .key = entry.key,
                     .maybe_node = entry.maybe_node,
@@ -556,6 +559,7 @@ pub const Parser = struct {
 
             self.nodes.set(node_index, .{
                 .tag = .map_many,
+                .scope = scope,
                 .data = .{ .extra = @enumFromInt(extra_index) },
             });
         }
@@ -603,12 +607,10 @@ pub const Parser = struct {
 
         log.debug("(list) end {s}@{d}", .{ @tagName(self.getToken(node_end).id), node_end });
 
-        try self.nodes_scopes.putNoClobber(gpa, node_index, .{
+        try self.encodeList(gpa, node_index, values.items, .{
             .start = node_start,
             .end = node_end,
         });
-
-        try self.encodeList(gpa, node_index, values.items);
 
         return node_index.toOptional();
     }
@@ -641,36 +643,46 @@ pub const Parser = struct {
 
         log.debug("(list) end {s}@{d}", .{ @tagName(self.getToken(node_end).id), node_end });
 
-        try self.nodes_scopes.putNoClobber(gpa, node_index, .{
+        try self.encodeList(gpa, node_index, values.items, .{
             .start = node_start,
             .end = node_end,
         });
 
-        try self.encodeList(gpa, node_index, values.items);
-
         return node_index.toOptional();
     }
 
-    fn encodeList(self: *Parser, gpa: Allocator, node_index: Node.Index, values: []const List.Entry) Allocator.Error!void {
+    fn encodeList(
+        self: *Parser,
+        gpa: Allocator,
+        node_index: Node.Index,
+        values: []const List.Entry,
+        node_scope: Node.Scope,
+    ) Allocator.Error!void {
         const index = @intFromEnum(node_index);
         switch (values.len) {
             0 => {
                 self.nodes.set(index, .{
                     .tag = .list_empty,
+                    .scope = node_scope,
                     .data = undefined,
                 });
             },
             1 => {
                 self.nodes.set(index, .{
                     .tag = .list_one,
+                    .scope = node_scope,
                     .data = .{ .node = values[0].node },
                 });
             },
             2 => {
-                self.nodes.set(index, .{ .tag = .list_two, .data = .{ .list = .{
-                    .el1 = values[0].node,
-                    .el2 = values[1].node,
-                } } });
+                self.nodes.set(index, .{
+                    .tag = .list_two,
+                    .scope = node_scope,
+                    .data = .{ .list = .{
+                        .el1 = values[0].node,
+                        .el2 = values[1].node,
+                    } },
+                });
             },
             else => {
                 try self.extra.ensureUnusedCapacity(gpa, values.len + 1);
@@ -684,6 +696,7 @@ pub const Parser = struct {
 
                 self.nodes.set(index, .{
                     .tag = .list_many,
+                    .scope = node_scope,
                     .data = .{ .extra = @enumFromInt(extra_index) },
                 });
             },
@@ -747,12 +760,11 @@ pub const Parser = struct {
 
         self.nodes.set(node_index, .{
             .tag = .value,
+            .scope = .{
+                .start = node_start,
+                .end = node_end,
+            },
             .data = .{ .string = string },
-        });
-
-        try self.nodes_scopes.putNoClobber(gpa, @enumFromInt(node_index), .{
-            .start = node_start,
-            .end = node_end,
         });
 
         return @as(Node.Index, @enumFromInt(node_index)).toOptional();
