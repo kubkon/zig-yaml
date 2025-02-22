@@ -451,11 +451,11 @@ pub const Yaml = struct {
     }
 
     pub fn load(gpa: Allocator, source: []const u8) !Yaml {
-        var parser: Parser = .{ .gpa = gpa, .source = source };
-        defer parser.deinit();
-        try parser.parse();
+        var parser: Parser = .{ .source = source };
+        defer parser.deinit(gpa);
+        try parser.parse(gpa);
 
-        var tree = try parser.toOwnedTree();
+        var tree = try parser.toOwnedTree(gpa);
         errdefer tree.deinit(gpa);
 
         var docs: std.ArrayListUnmanaged(Value) = .empty;
