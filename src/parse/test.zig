@@ -14,9 +14,9 @@ fn expectNodeScope(tree: Tree, node: Node.Index, from: usize, to: usize) !void {
 }
 
 fn expectValueMapEntry(tree: Tree, entry_data: parse.Map.Entry, exp_key: []const u8, exp_value: []const u8) !void {
-    const key = tree.getToken(entry_data.key);
+    const key = tree.token(entry_data.key);
     try testing.expectEqual(key.id, .literal);
-    try testing.expectEqualStrings(exp_key, tree.getRaw(entry_data.key, entry_data.key));
+    try testing.expectEqualStrings(exp_key, tree.rawString(entry_data.key, entry_data.key));
 
     const maybe_value = entry_data.maybe_node;
     try testing.expect(maybe_value != .none);
@@ -24,14 +24,14 @@ fn expectValueMapEntry(tree: Tree, entry_data: parse.Map.Entry, exp_key: []const
 
     const value = maybe_value.unwrap().?;
     const scope = tree.nodeScope(value);
-    const string = tree.getRaw(scope.start, scope.end);
+    const string = tree.rawString(scope.start, scope.end);
     try testing.expectEqualStrings(exp_value, string);
 }
 
 fn expectStringValueMapEntry(tree: Tree, entry_data: parse.Map.Entry, exp_key: []const u8, exp_value: []const u8) !void {
-    const key = tree.getToken(entry_data.key);
+    const key = tree.token(entry_data.key);
     try testing.expectEqual(key.id, .literal);
-    try testing.expectEqualStrings(exp_key, tree.getRaw(entry_data.key, entry_data.key));
+    try testing.expectEqualStrings(exp_key, tree.rawString(entry_data.key, entry_data.key));
 
     const maybe_value = entry_data.maybe_node;
     try testing.expect(maybe_value != .none);
@@ -47,7 +47,7 @@ fn expectValueListEntry(tree: Tree, entry_data: parse.List.Entry, exp_value: []c
     try testing.expectEqual(.value, tree.nodeTag(value));
 
     const scope = tree.nodeScope(value);
-    const string = tree.getRaw(scope.start, scope.end);
+    const string = tree.rawString(scope.start, scope.end);
     try testing.expectEqualStrings(exp_value, string);
 }
 
@@ -84,7 +84,7 @@ test "explicit doc" {
 
     try expectNodeScope(tree, doc, 0, tree.tokens.len - 2);
 
-    const directive = tree.getDirective(doc).?;
+    const directive = tree.directive(doc).?;
     try testing.expectEqualStrings("tapi-tbd", directive);
 
     const doc_value = tree.nodeData(doc).doc_with_directive.maybe_node;
@@ -182,9 +182,9 @@ test "nested maps" {
 
     var entry_data = tree.extraData(parse.Map.Entry, map_data.end);
     {
-        const key = tree.getToken(entry_data.data.key);
+        const key = tree.token(entry_data.data.key);
         try testing.expectEqual(key.id, .literal);
-        try testing.expectEqualStrings("key1", tree.getRaw(entry_data.data.key, entry_data.data.key));
+        try testing.expectEqualStrings("key1", tree.rawString(entry_data.data.key, entry_data.data.key));
 
         const maybe_nested_map = entry_data.data.maybe_node;
         try testing.expect(maybe_nested_map != .none);
@@ -239,9 +239,9 @@ test "map of list of values" {
     const map_data = tree.nodeData(map).map;
 
     {
-        const key = tree.getToken(map_data.key);
+        const key = tree.token(map_data.key);
         try testing.expectEqual(key.id, .literal);
-        try testing.expectEqualStrings("ints", tree.getRaw(map_data.key, map_data.key));
+        try testing.expectEqualStrings("ints", tree.rawString(map_data.key, map_data.key));
 
         const maybe_nested_list = map_data.maybe_node;
         try testing.expect(maybe_nested_list != .none);
@@ -296,9 +296,9 @@ test "map of list of maps" {
     const map_data = tree.nodeData(map).map;
 
     {
-        const key = tree.getToken(map_data.key);
+        const key = tree.token(map_data.key);
         try testing.expectEqual(key.id, .literal);
-        try testing.expectEqualStrings("key1", tree.getRaw(map_data.key, map_data.key));
+        try testing.expectEqualStrings("key1", tree.rawString(map_data.key, map_data.key));
 
         const maybe_nested_list = map_data.maybe_node;
         try testing.expect(maybe_nested_list != .none);
@@ -356,9 +356,9 @@ test "map of list of maps with inner list" {
     const map_data = tree.nodeData(map).map;
 
     {
-        const key = tree.getToken(map_data.key);
+        const key = tree.token(map_data.key);
         try testing.expectEqual(key.id, .literal);
-        try testing.expectEqualStrings("outer", tree.getRaw(map_data.key, map_data.key));
+        try testing.expectEqualStrings("outer", tree.rawString(map_data.key, map_data.key));
 
         const maybe_nested_list = map_data.maybe_node;
         try testing.expect(maybe_nested_list != .none);
@@ -383,9 +383,9 @@ test "map of list of maps with inner list" {
             nested_nested_entry_data = tree.extraData(parse.Map.Entry, nested_nested_entry_data.end);
             {
                 const nested_nested_map_entry = nested_nested_entry_data.data;
-                const nested_nested_key = tree.getToken(nested_nested_map_entry.key);
+                const nested_nested_key = tree.token(nested_nested_map_entry.key);
                 try testing.expectEqual(nested_nested_key.id, .literal);
-                try testing.expectEqualStrings("fooers", tree.getRaw(nested_nested_map_entry.key, nested_nested_map_entry.key));
+                try testing.expectEqualStrings("fooers", tree.rawString(nested_nested_map_entry.key, nested_nested_map_entry.key));
 
                 const nested_nested_value = nested_nested_map_entry.maybe_node;
                 try testing.expect(nested_nested_value != .none);
@@ -410,9 +410,9 @@ test "map of list of maps with inner list" {
             nested_nested_entry_data = tree.extraData(parse.Map.Entry, nested_nested_entry_data.end);
             {
                 const nested_nested_map_entry = nested_nested_entry_data.data;
-                const nested_nested_key = tree.getToken(nested_nested_map_entry.key);
+                const nested_nested_key = tree.token(nested_nested_map_entry.key);
                 try testing.expectEqual(nested_nested_key.id, .literal);
-                try testing.expectEqualStrings("fooers", tree.getRaw(nested_nested_map_entry.key, nested_nested_map_entry.key));
+                try testing.expectEqualStrings("fooers", tree.rawString(nested_nested_map_entry.key, nested_nested_map_entry.key));
 
                 const nested_nested_value = nested_nested_map_entry.maybe_node;
                 try testing.expect(nested_nested_value != .none);
@@ -581,9 +581,9 @@ test "inline list as mapping value" {
 
     const map_data = tree.nodeData(map).map;
 
-    const key = tree.getToken(map_data.key);
+    const key = tree.token(map_data.key);
     try testing.expectEqual(key.id, .literal);
-    try testing.expectEqualStrings("key", tree.getRaw(map_data.key, map_data.key));
+    try testing.expectEqualStrings("key", tree.rawString(map_data.key, map_data.key));
 
     const maybe_nested_list = map_data.maybe_node;
     try testing.expect(maybe_nested_list != .none);

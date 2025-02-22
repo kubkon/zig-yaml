@@ -177,7 +177,7 @@ pub const Value = union(enum) {
                 var out_map = std.StringArrayHashMap(Value).init(arena);
                 try out_map.ensureTotalCapacity(1);
 
-                const key = try arena.dupe(u8, tree.getRaw(entry.key, entry.key));
+                const key = try arena.dupe(u8, tree.rawString(entry.key, entry.key));
                 const gop = out_map.getOrPutAssumeCapacity(key);
                 if (gop.found_existing) {
                     return error.DuplicateMapKey;
@@ -204,7 +204,7 @@ pub const Value = union(enum) {
                     const entry = tree.extraData(parse_util.Map.Entry, extra_end);
                     extra_end = entry.end;
 
-                    const key = try arena.dupe(u8, tree.getRaw(entry.data.key, entry.data.key));
+                    const key = try arena.dupe(u8, tree.rawString(entry.data.key, entry.data.key));
                     const gop = out_map.getOrPutAssumeCapacity(key);
                     if (gop.found_existing) {
                         return error.DuplicateMapKey;
@@ -267,7 +267,7 @@ pub const Value = union(enum) {
                 const raw = raw: switch (tag) {
                     .value => {
                         const scope = tree.nodeScope(node_index);
-                        break :raw tree.getRaw(scope.start, scope.end);
+                        break :raw tree.rawString(scope.start, scope.end);
                     },
                     .string_value => {
                         const string = tree.nodeData(node_index).string;
@@ -595,7 +595,7 @@ pub const Yaml = struct {
     pub fn stringify(self: Yaml, writer: anytype) !void {
         for (self.docs.items, self.tree.docs) |doc, node| {
             try writer.writeAll("---");
-            if (self.tree.getDirective(node)) |directive| {
+            if (self.tree.directive(node)) |directive| {
                 try writer.print(" !{s}", .{directive});
             }
             try writer.writeByte('\n');
