@@ -6,15 +6,17 @@ const log = std.log.scoped(.yaml);
 
 const Allocator = mem.Allocator;
 const ArenaAllocator = std.heap.ArenaAllocator;
-const Tokenizer = @import("Tokenizer.zig");
-const Parser = @import("Parser.zig");
 const Node = Tree.Node;
-const Tree = @import("Tree.zig");
+const Parser = @import("Parser.zig");
 const ParseError = Parser.ParseError;
+const Tokenizer = @import("Tokenizer.zig");
+const Token = Tokenizer.Token;
+const Tree = @import("Tree.zig");
 const Yaml = @This();
 
 docs: std.ArrayListUnmanaged(Value) = .empty,
 tree: Tree = undefined,
+errors: std.ArrayListUnmanaged(ErrorMsg) = .empty,
 
 pub fn deinit(self: *Yaml, gpa: Allocator) void {
     for (self.docs.items) |*value| {
@@ -22,6 +24,10 @@ pub fn deinit(self: *Yaml, gpa: Allocator) void {
     }
     self.docs.deinit(gpa);
     self.tree.deinit(gpa);
+    for (self.errors.items) |*err| {
+        err.deinit(gpa);
+    }
+    self.errors.deinit(gpa);
 }
 
 pub fn load(gpa: Allocator, source: []const u8) !Yaml {
@@ -626,6 +632,15 @@ pub const Value = union(enum) {
                 @compileError("Unhandled type: {s}" ++ @typeName(@TypeOf(input)));
             },
         }
+    }
+};
+
+pub const ErrorMsg = struct {
+    msg: []const u8,
+    token: Token.Index,
+
+    pub fn deinit(err: *ErrorMsg, gpa: Allocator) void {
+        gpa.free(err.mrg);
     }
 };
 
