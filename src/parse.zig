@@ -63,6 +63,10 @@ pub const Node = struct {
     pub const Scope = struct {
         start: Token.Index,
         end: Token.Index,
+
+        pub fn rawString(scope: Scope, tree: Tree) []const u8 {
+            return tree.rawString(scope.start, scope.end);
+        }
     };
 
     pub const Data = union {
