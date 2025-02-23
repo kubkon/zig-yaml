@@ -14,8 +14,20 @@ const Node = parse_util.Node;
 const Tree = parse_util.Tree;
 const Parser = parse_util.Parser;
 const ParseError = parse_util.ParseError;
+
 const supportedTruthyBooleanValue: [4][]const u8 = .{ "y", "yes", "on", "true" };
 const supportedFalsyBooleanValue: [4][]const u8 = .{ "n", "no", "off", "false" };
+
+const longestBooleanValueString = blk: {
+    var lengths: [supportedTruthyBooleanValue.len + supportedFalsyBooleanValue.len]usize = undefined;
+    for (supportedTruthyBooleanValue, 0..) |v, i| {
+        lengths[i] = v.len;
+    }
+    for (supportedFalsyBooleanValue, supportedTruthyBooleanValue.len..) |v, i| {
+        lengths[i] = v.len;
+    }
+    break :blk mem.max(usize, &lengths);
+};
 
 pub const YamlError = error{
     UnexpectedNodeType,
@@ -326,9 +338,9 @@ pub const Value = union(enum) {
                     return Value{ .float = float };
                 }
 
-                if (raw.len <= 5 and raw.len > 0) {
-                    const lower_raw = try std.ascii.allocLowerString(gpa, raw);
-                    defer gpa.free(lower_raw);
+                if (raw.len > 0 and raw.len <= longestBooleanValueString) {
+                    var buffer: [longestBooleanValueString]u8 = undefined;
+                    const lower_raw = std.ascii.lowerString(&buffer, raw);
 
                     for (supportedTruthyBooleanValue) |v| {
                         if (std.mem.eql(u8, v, lower_raw)) {
