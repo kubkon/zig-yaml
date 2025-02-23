@@ -302,15 +302,9 @@ pub const Value = union(enum) {
                 return Value{ .list = try out_list.toOwnedSlice(gpa) };
             },
             .value, .string_value => {
-                const raw = raw: switch (tag) {
-                    .value => {
-                        const scope = tree.nodeScope(node_index);
-                        break :raw tree.rawString(scope.start, scope.end);
-                    },
-                    .string_value => {
-                        const string = tree.nodeData(node_index).string;
-                        break :raw string.slice(tree);
-                    },
+                const raw = switch (tag) {
+                    .value => tree.nodeScope(node_index).rawString(tree),
+                    .string_value => tree.nodeData(node_index).string.slice(tree),
                     else => unreachable,
                 };
 

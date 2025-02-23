@@ -23,8 +23,7 @@ fn expectValueMapEntry(tree: Tree, entry_data: parse.Map.Entry, exp_key: []const
     try testing.expectEqual(.value, tree.nodeTag(maybe_value.unwrap().?));
 
     const value = maybe_value.unwrap().?;
-    const scope = tree.nodeScope(value);
-    const string = tree.rawString(scope.start, scope.end);
+    const string = tree.nodeScope(value).rawString(tree);
     try testing.expectEqualStrings(exp_value, string);
 }
 
@@ -46,8 +45,7 @@ fn expectValueListEntry(tree: Tree, entry_data: parse.List.Entry, exp_value: []c
     const value = entry_data.node;
     try testing.expectEqual(.value, tree.nodeTag(value));
 
-    const scope = tree.nodeScope(value);
-    const string = tree.rawString(scope.start, scope.end);
+    const string = tree.nodeScope(value).rawString(tree);
     try testing.expectEqualStrings(exp_value, string);
 }
 
