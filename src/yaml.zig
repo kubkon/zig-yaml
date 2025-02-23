@@ -190,15 +190,11 @@ pub const Value = union(enum) {
         const tag = tree.nodeTag(node_index);
         switch (tag) {
             .doc => {
-                const inner = tree.nodeData(node_index).maybe_node.unwrap() orelse
-                    // empty doc
-                    return Value{ .empty = {} };
+                const inner = tree.nodeData(node_index).maybe_node.unwrap() orelse return .empty;
                 return Value.fromNode(gpa, tree, inner);
             },
             .doc_with_directive => {
-                const inner = tree.nodeData(node_index).doc_with_directive.maybe_node.unwrap() orelse
-                    // empty doc
-                    return Value{ .empty = {} };
+                const inner = tree.nodeData(node_index).doc_with_directive.maybe_node.unwrap() orelse return .empty;
                 return Value.fromNode(gpa, tree, inner);
             },
             .map_single => {
@@ -216,11 +212,10 @@ pub const Value = union(enum) {
                 const gop = out_map.getOrPutAssumeCapacity(key);
                 if (gop.found_existing) return error.DuplicateMapKey;
 
-                const value = if (entry.maybe_node.unwrap()) |value|
+                gop.value_ptr.* = if (entry.maybe_node.unwrap()) |value|
                     try Value.fromNode(gpa, tree, value)
                 else
                     .empty;
-                gop.value_ptr.* = value;
 
                 return Value{ .map = out_map };
             },
@@ -251,11 +246,10 @@ pub const Value = union(enum) {
                     const gop = out_map.getOrPutAssumeCapacity(key);
                     if (gop.found_existing) return error.DuplicateMapKey;
 
-                    const value = if (entry.data.maybe_node.unwrap()) |value|
+                    gop.value_ptr.* = if (entry.data.maybe_node.unwrap()) |value|
                         try Value.fromNode(gpa, tree, value)
                     else
                         .empty;
-                    gop.value_ptr.* = value;
                 }
 
                 return Value{ .map = out_map };
@@ -265,33 +259,25 @@ pub const Value = union(enum) {
             },
             .list_one => {
                 const value_index = tree.nodeData(node_index).node;
-
-                var out_list: std.ArrayListUnmanaged(Value) = .empty;
-                defer out_list.deinit(gpa);
-                try out_list.ensureTotalCapacityPrecise(gpa, 1);
-
-                var value = try Value.fromNode(gpa, tree, value_index);
-                errdefer value.deinit(gpa);
-                out_list.appendAssumeCapacity(value);
-
-                return Value{ .list = try out_list.toOwnedSlice(gpa) };
+                const out_list = try gpa.alloc(Value, 1);
+                errdefer gpa.free(out_list);
+                const value = try Value.fromNode(gpa, tree, value_index);
+                out_list[0] = value;
+                return Value{ .list = out_list };
             },
             .list_two => {
                 const list = tree.nodeData(node_index).list;
-
-                var out_list: std.ArrayListUnmanaged(Value) = .empty;
-                errdefer for (out_list.items) |*value| {
-                    value.deinit(gpa);
-                };
-                defer out_list.deinit(gpa);
-                try out_list.ensureTotalCapacityPrecise(gpa, 2);
-
-                for (&[2]Node.Index{ list.el1, list.el2 }) |value_index| {
-                    const value = try Value.fromNode(gpa, tree, value_index);
-                    out_list.appendAssumeCapacity(value);
+                const out_list = try gpa.alloc(Value, 2);
+                errdefer {
+                    for (out_list) |*value| {
+                        value.deinit(gpa);
+                    }
+                    gpa.free(out_list);
                 }
-
-                return Value{ .list = try out_list.toOwnedSlice(gpa) };
+                for (out_list, &[2]Node.Index{ list.el1, list.el2 }) |*out, value_index| {
+                    out.* = try Value.fromNode(gpa, tree, value_index);
+                }
+                return Value{ .list = out_list };
             },
             .list_many => {
                 const extra_index = tree.nodeData(node_index).extra;
