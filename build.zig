@@ -7,11 +7,11 @@ pub fn build(b: *std.Build) void {
 
     const enable_logging = b.option(bool, "log", "Whether to enable logging") orelse false;
     const yaml_module = b.addModule("yaml", .{
-        .root_source_file = b.path("src/yaml.zig"),
+        .root_source_file = b.path("src/lib.zig"),
     });
 
     const yaml_tests = b.addTest(.{
-        .root_source_file = b.path("src/yaml.zig"),
+        .root_source_file = b.path("src/lib.zig"),
         .target = target,
         .optimize = optimize,
     });

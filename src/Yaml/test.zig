@@ -1,10 +1,10 @@
 const std = @import("std");
 const mem = std.mem;
+const stringify = @import("../stringify.zig").stringify;
 const testing = std.testing;
-const Arena = std.heap.ArenaAllocator;
 
-const yaml_mod = @import("../yaml.zig");
-const Yaml = yaml_mod.Yaml;
+const Arena = std.heap.ArenaAllocator;
+const Yaml = @import("../Yaml.zig");
 
 test "simple list" {
     const source =
@@ -536,7 +536,7 @@ fn testStringify(expected: []const u8, input: anytype) !void {
     var output = std.ArrayList(u8).init(testing.allocator);
     defer output.deinit();
 
-    try yaml_mod.stringify(testing.allocator, input, output.writer());
+    try stringify(testing.allocator, input, output.writer());
     try testing.expectEqualStrings(expected, output.items);
 }
 
