@@ -6,14 +6,202 @@ const log = std.log.scoped(.yaml);
 
 const Allocator = mem.Allocator;
 const ArenaAllocator = std.heap.ArenaAllocator;
+const Tokenizer = @import("Tokenizer.zig");
+const Parser = @import("Parser.zig");
+const Node = Tree.Node;
+const Tree = @import("Tree.zig");
+const ParseError = Parser.ParseError;
+const Yaml = @This();
 
-pub const Tokenizer = @import("Tokenizer.zig");
-pub const parse_util = @import("parse.zig");
+docs: std.ArrayListUnmanaged(Value) = .empty,
+tree: Tree = undefined,
 
-const Node = parse_util.Node;
-const Tree = parse_util.Tree;
-const Parser = parse_util.Parser;
-const ParseError = parse_util.ParseError;
+pub fn deinit(self: *Yaml, gpa: Allocator) void {
+    for (self.docs.items) |*value| {
+        value.deinit(gpa);
+    }
+    self.docs.deinit(gpa);
+    self.tree.deinit(gpa);
+}
+
+pub fn load(gpa: Allocator, source: []const u8) !Yaml {
+    var parser: Parser = .{ .source = source };
+    defer parser.deinit(gpa);
+    try parser.parse(gpa);
+
+    var tree = try parser.toOwnedTree(gpa);
+    errdefer tree.deinit(gpa);
+
+    var docs: std.ArrayListUnmanaged(Value) = .empty;
+    errdefer docs.deinit(gpa);
+    try docs.ensureTotalCapacityPrecise(gpa, tree.docs.len);
+
+    for (tree.docs) |node| {
+        const value = try Value.fromNode(gpa, tree, node);
+        docs.appendAssumeCapacity(value);
+    }
+
+    return Yaml{
+        .tree = tree,
+        .docs = docs,
+    };
+}
+
+pub fn parse(self: Yaml, arena: Allocator, comptime T: type) Error!T {
+    if (self.docs.items.len == 0) {
+        if (@typeInfo(T) == .void) return {};
+        return error.TypeMismatch;
+    }
+
+    if (self.docs.items.len == 1) {
+        return self.parseValue(arena, T, self.docs.items[0]);
+    }
+
+    switch (@typeInfo(T)) {
+        .array => |info| {
+            var parsed: T = undefined;
+            for (self.docs.items, 0..) |doc, i| {
+                parsed[i] = try self.parseValue(arena, info.child, doc);
+            }
+            return parsed;
+        },
+        .pointer => |info| {
+            switch (info.size) {
+                .slice => {
+                    var parsed = try arena.alloc(info.child, self.docs.items.len);
+                    for (self.docs.items, 0..) |doc, i| {
+                        parsed[i] = try self.parseValue(arena, info.child, doc);
+                    }
+                    return parsed;
+                },
+                else => return error.TypeMismatch,
+            }
+        },
+        .@"union" => return error.Unimplemented,
+        else => return error.TypeMismatch,
+    }
+}
+
+fn parseValue(self: Yaml, arena: Allocator, comptime T: type, value: Value) Error!T {
+    return switch (@typeInfo(T)) {
+        .int => math.cast(T, try value.asInt()) orelse return error.Overflow,
+        .bool => self.parseBoolean(bool, value),
+        .float => if (value.asFloat()) |float| {
+            return math.lossyCast(T, float);
+        } else |_| {
+            return math.lossyCast(T, try value.asInt());
+        },
+        .@"struct" => self.parseStruct(arena, T, try value.asMap()),
+        .@"union" => self.parseUnion(arena, T, value),
+        .array => self.parseArray(arena, T, try value.asList()),
+        .pointer => if (value.asList()) |list| {
+            return self.parsePointer(arena, T, .{ .list = list });
+        } else |_| {
+            return self.parsePointer(arena, T, .{ .string = try value.asString() });
+        },
+        .void => error.TypeMismatch,
+        .optional => unreachable,
+        else => error.Unimplemented,
+    };
+}
+
+fn parseBoolean(self: Yaml, comptime T: type, value: Value) Error!T {
+    _ = self;
+    return value.asBool();
+}
+
+fn parseUnion(self: Yaml, arena: Allocator, comptime T: type, value: Value) Error!T {
+    const union_info = @typeInfo(T).@"union";
+
+    if (union_info.tag_type) |_| {
+        inline for (union_info.fields) |field| {
+            if (self.parseValue(arena, field.type, value)) |u_value| {
+                return @unionInit(T, field.name, u_value);
+            } else |err| switch (err) {
+                error.TypeMismatch => {},
+                error.StructFieldMissing => {},
+                else => return err,
+            }
+        }
+    } else return error.UntaggedUnion;
+
+    return error.UnionTagMissing;
+}
+
+fn parseOptional(self: Yaml, arena: Allocator, comptime T: type, value: ?Value) Error!T {
+    const unwrapped = value orelse return null;
+    const opt_info = @typeInfo(T).optional;
+    return @as(T, try self.parseValue(arena, opt_info.child, unwrapped));
+}
+
+fn parseStruct(self: Yaml, arena: Allocator, comptime T: type, map: Map) Error!T {
+    const struct_info = @typeInfo(T).@"struct";
+    var parsed: T = undefined;
+
+    inline for (struct_info.fields) |field| {
+        const value: ?Value = map.get(field.name) orelse blk: {
+            const field_name = try mem.replaceOwned(u8, arena, field.name, "_", "-");
+            break :blk map.get(field_name);
+        };
+
+        if (@typeInfo(field.type) == .optional) {
+            @field(parsed, field.name) = try self.parseOptional(arena, field.type, value);
+            continue;
+        }
+
+        const unwrapped = value orelse {
+            log.debug("missing struct field: {s}: {s}", .{ field.name, @typeName(field.type) });
+            return error.StructFieldMissing;
+        };
+        @field(parsed, field.name) = try self.parseValue(arena, field.type, unwrapped);
+    }
+
+    return parsed;
+}
+
+fn parsePointer(self: Yaml, arena: Allocator, comptime T: type, value: Value) Error!T {
+    const ptr_info = @typeInfo(T).pointer;
+
+    switch (ptr_info.size) {
+        .slice => {
+            if (ptr_info.child == u8) {
+                return value.asString();
+            }
+
+            var parsed = try arena.alloc(ptr_info.child, value.list.len);
+            for (value.list, 0..) |elem, i| {
+                parsed[i] = try self.parseValue(arena, ptr_info.child, elem);
+            }
+            return parsed;
+        },
+        else => return error.Unimplemented,
+    }
+}
+
+fn parseArray(self: Yaml, arena: Allocator, comptime T: type, list: List) Error!T {
+    const array_info = @typeInfo(T).array;
+    if (array_info.len != list.len) return error.ArraySizeMismatch;
+
+    var parsed: T = undefined;
+    for (list, 0..) |elem, i| {
+        parsed[i] = try self.parseValue(arena, array_info.child, elem);
+    }
+
+    return parsed;
+}
+
+pub fn stringify(self: Yaml, writer: anytype) !void {
+    for (self.docs.items, self.tree.docs) |doc, node| {
+        try writer.writeAll("---");
+        if (self.tree.directive(node)) |directive| {
+            try writer.print(" !{s}", .{directive});
+        }
+        try writer.writeByte('\n');
+        try doc.stringify(writer, .{});
+        try writer.writeByte('\n');
+    }
+    try writer.writeAll("...\n");
+}
 
 const supportedTruthyBooleanValue: [4][]const u8 = .{ "y", "yes", "on", "true" };
 const supportedFalsyBooleanValue: [4][]const u8 = .{ "n", "no", "off", "false" };
@@ -27,6 +215,17 @@ const longestBooleanValueString = blk: {
         lengths[i] = v.len;
     }
     break :blk mem.max(usize, &lengths);
+};
+
+pub const Error = error{
+    Unimplemented,
+    TypeMismatch,
+    StructFieldMissing,
+    ArraySizeMismatch,
+    UntaggedUnion,
+    UnionTagMissing,
+    Overflow,
+    OutOfMemory,
 };
 
 pub const YamlError = error{
@@ -221,7 +420,7 @@ pub const Value = union(enum) {
             },
             .map_many => {
                 const extra_index = tree.nodeData(node_index).extra;
-                const map = tree.extraData(parse_util.Map, extra_index);
+                const map = tree.extraData(Tree.Map, extra_index);
 
                 // TODO use ContextAdapted HashMap and do not duplicate keys, intern
                 // in a contiguous string buffer.
@@ -237,7 +436,7 @@ pub const Value = union(enum) {
 
                 var extra_end = map.end;
                 for (0..map.data.map_len) |_| {
-                    const entry = tree.extraData(parse_util.Map.Entry, extra_end);
+                    const entry = tree.extraData(Tree.Map.Entry, extra_end);
                     extra_end = entry.end;
 
                     const key = try gpa.dupe(u8, tree.rawString(entry.data.key, entry.data.key));
@@ -281,7 +480,7 @@ pub const Value = union(enum) {
             },
             .list_many => {
                 const extra_index = tree.nodeData(node_index).extra;
-                const list = tree.extraData(parse_util.List, extra_index);
+                const list = tree.extraData(Tree.List, extra_index);
 
                 var out_list: std.ArrayListUnmanaged(Value) = .empty;
                 errdefer for (out_list.items) |*value| {
@@ -292,7 +491,7 @@ pub const Value = union(enum) {
 
                 var extra_end = list.end;
                 for (0..list.data.list_len) |_| {
-                    const elem = tree.extraData(parse_util.List.Entry, extra_end);
+                    const elem = tree.extraData(Tree.List.Entry, extra_end);
                     extra_end = elem.end;
 
                     const value = try Value.fromNode(gpa, tree, elem.data.node);
@@ -430,224 +629,9 @@ pub const Value = union(enum) {
     }
 };
 
-pub const Yaml = struct {
-    docs: std.ArrayListUnmanaged(Value) = .empty,
-    tree: Tree = undefined,
-
-    pub fn deinit(self: *Yaml, gpa: Allocator) void {
-        for (self.docs.items) |*value| {
-            value.deinit(gpa);
-        }
-        self.docs.deinit(gpa);
-        self.tree.deinit(gpa);
-    }
-
-    pub fn load(gpa: Allocator, source: []const u8) !Yaml {
-        var parser: Parser = .{ .source = source };
-        defer parser.deinit(gpa);
-        try parser.parse(gpa);
-
-        var tree = try parser.toOwnedTree(gpa);
-        errdefer tree.deinit(gpa);
-
-        var docs: std.ArrayListUnmanaged(Value) = .empty;
-        errdefer docs.deinit(gpa);
-        try docs.ensureTotalCapacityPrecise(gpa, tree.docs.len);
-
-        for (tree.docs) |node| {
-            const value = try Value.fromNode(gpa, tree, node);
-            docs.appendAssumeCapacity(value);
-        }
-
-        return Yaml{
-            .tree = tree,
-            .docs = docs,
-        };
-    }
-
-    pub const Error = error{
-        Unimplemented,
-        TypeMismatch,
-        StructFieldMissing,
-        ArraySizeMismatch,
-        UntaggedUnion,
-        UnionTagMissing,
-        Overflow,
-        OutOfMemory,
-    };
-
-    pub fn parse(self: Yaml, arena: Allocator, comptime T: type) Error!T {
-        if (self.docs.items.len == 0) {
-            if (@typeInfo(T) == .void) return {};
-            return error.TypeMismatch;
-        }
-
-        if (self.docs.items.len == 1) {
-            return self.parseValue(arena, T, self.docs.items[0]);
-        }
-
-        switch (@typeInfo(T)) {
-            .array => |info| {
-                var parsed: T = undefined;
-                for (self.docs.items, 0..) |doc, i| {
-                    parsed[i] = try self.parseValue(arena, info.child, doc);
-                }
-                return parsed;
-            },
-            .pointer => |info| {
-                switch (info.size) {
-                    .slice => {
-                        var parsed = try arena.alloc(info.child, self.docs.items.len);
-                        for (self.docs.items, 0..) |doc, i| {
-                            parsed[i] = try self.parseValue(arena, info.child, doc);
-                        }
-                        return parsed;
-                    },
-                    else => return error.TypeMismatch,
-                }
-            },
-            .@"union" => return error.Unimplemented,
-            else => return error.TypeMismatch,
-        }
-    }
-
-    fn parseValue(self: Yaml, arena: Allocator, comptime T: type, value: Value) Error!T {
-        return switch (@typeInfo(T)) {
-            .int => math.cast(T, try value.asInt()) orelse return error.Overflow,
-            .bool => self.parseBoolean(bool, value),
-            .float => if (value.asFloat()) |float| {
-                return math.lossyCast(T, float);
-            } else |_| {
-                return math.lossyCast(T, try value.asInt());
-            },
-            .@"struct" => self.parseStruct(arena, T, try value.asMap()),
-            .@"union" => self.parseUnion(arena, T, value),
-            .array => self.parseArray(arena, T, try value.asList()),
-            .pointer => if (value.asList()) |list| {
-                return self.parsePointer(arena, T, .{ .list = list });
-            } else |_| {
-                return self.parsePointer(arena, T, .{ .string = try value.asString() });
-            },
-            .void => error.TypeMismatch,
-            .optional => unreachable,
-            else => error.Unimplemented,
-        };
-    }
-
-    fn parseBoolean(self: Yaml, comptime T: type, value: Value) Error!T {
-        _ = self;
-        return value.asBool();
-    }
-
-    fn parseUnion(self: Yaml, arena: Allocator, comptime T: type, value: Value) Error!T {
-        const union_info = @typeInfo(T).@"union";
-
-        if (union_info.tag_type) |_| {
-            inline for (union_info.fields) |field| {
-                if (self.parseValue(arena, field.type, value)) |u_value| {
-                    return @unionInit(T, field.name, u_value);
-                } else |err| switch (err) {
-                    error.TypeMismatch => {},
-                    error.StructFieldMissing => {},
-                    else => return err,
-                }
-            }
-        } else return error.UntaggedUnion;
-
-        return error.UnionTagMissing;
-    }
-
-    fn parseOptional(self: Yaml, arena: Allocator, comptime T: type, value: ?Value) Error!T {
-        const unwrapped = value orelse return null;
-        const opt_info = @typeInfo(T).optional;
-        return @as(T, try self.parseValue(arena, opt_info.child, unwrapped));
-    }
-
-    fn parseStruct(self: Yaml, arena: Allocator, comptime T: type, map: Map) Error!T {
-        const struct_info = @typeInfo(T).@"struct";
-        var parsed: T = undefined;
-
-        inline for (struct_info.fields) |field| {
-            const value: ?Value = map.get(field.name) orelse blk: {
-                const field_name = try mem.replaceOwned(u8, arena, field.name, "_", "-");
-                break :blk map.get(field_name);
-            };
-
-            if (@typeInfo(field.type) == .optional) {
-                @field(parsed, field.name) = try self.parseOptional(arena, field.type, value);
-                continue;
-            }
-
-            const unwrapped = value orelse {
-                log.debug("missing struct field: {s}: {s}", .{ field.name, @typeName(field.type) });
-                return error.StructFieldMissing;
-            };
-            @field(parsed, field.name) = try self.parseValue(arena, field.type, unwrapped);
-        }
-
-        return parsed;
-    }
-
-    fn parsePointer(self: Yaml, arena: Allocator, comptime T: type, value: Value) Error!T {
-        const ptr_info = @typeInfo(T).pointer;
-
-        switch (ptr_info.size) {
-            .slice => {
-                if (ptr_info.child == u8) {
-                    return value.asString();
-                }
-
-                var parsed = try arena.alloc(ptr_info.child, value.list.len);
-                for (value.list, 0..) |elem, i| {
-                    parsed[i] = try self.parseValue(arena, ptr_info.child, elem);
-                }
-                return parsed;
-            },
-            else => return error.Unimplemented,
-        }
-    }
-
-    fn parseArray(self: Yaml, arena: Allocator, comptime T: type, list: List) Error!T {
-        const array_info = @typeInfo(T).array;
-        if (array_info.len != list.len) return error.ArraySizeMismatch;
-
-        var parsed: T = undefined;
-        for (list, 0..) |elem, i| {
-            parsed[i] = try self.parseValue(arena, array_info.child, elem);
-        }
-
-        return parsed;
-    }
-
-    pub fn stringify(self: Yaml, writer: anytype) !void {
-        for (self.docs.items, self.tree.docs) |doc, node| {
-            try writer.writeAll("---");
-            if (self.tree.directive(node)) |directive| {
-                try writer.print(" !{s}", .{directive});
-            }
-            try writer.writeByte('\n');
-            try doc.stringify(writer, .{});
-            try writer.writeByte('\n');
-        }
-        try writer.writeAll("...\n");
-    }
-};
-
-pub fn stringify(gpa: Allocator, input: anytype, writer: anytype) StringifyError!void {
-    var arena = ArenaAllocator.init(gpa);
-    defer arena.deinit();
-
-    const maybe_value = try Value.encode(arena.allocator(), input);
-
-    if (maybe_value) |value| {
-        // TODO should we output as an explicit doc?
-        // How can allow the user to specify?
-        try value.stringify(writer, .{});
-    }
-}
-
 test {
+    std.testing.refAllDecls(Parser);
     std.testing.refAllDecls(Tokenizer);
-    std.testing.refAllDecls(parse_util);
-    _ = @import("yaml/test.zig");
+    std.testing.refAllDecls(Tree);
+    _ = @import("Yaml/test.zig");
 }
