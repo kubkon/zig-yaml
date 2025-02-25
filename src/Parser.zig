@@ -14,7 +14,9 @@ const TokenWithLineCol = Tree.TokenWithLineCol;
 const Tree = @import("Tree.zig");
 const String = Tree.String;
 const Parser = @This();
+const Yaml = @import("Yaml.zig");
 
+ctx: *Yaml,
 source: []const u8,
 tokens: std.MultiArrayList(TokenWithLineCol) = .empty,
 token_it: TokenIterator = undefined,
@@ -210,6 +212,13 @@ fn doc(self: *Parser, gpa: Allocator) ParseError!Node.Index {
         if (self.eatToken(.eof, &.{})) |pos| {
             break :footer @enumFromInt(@intFromEnum(pos) - 1);
         }
+
+        try self.ctx.fail(
+            gpa,
+            self.tokens.items(.line_col)[@intFromEnum(self.token_it.pos)],
+            "expected end of document but found",
+            .{},
+        );
         return error.UnexpectedToken;
     };
 

@@ -6,6 +6,7 @@ const log = std.log.scoped(.yaml);
 
 const Allocator = mem.Allocator;
 const ArenaAllocator = std.heap.ArenaAllocator;
+const ErrorBundle = std.zig.ErrorBundle;
 const Node = Tree.Node;
 const Parser = @import("Parser.zig");
 const ParseError = Parser.ParseError;
@@ -14,8 +15,9 @@ const Token = Tokenizer.Token;
 const Tree = @import("Tree.zig");
 const Yaml = @This();
 
+source: []const u8,
 docs: std.ArrayListUnmanaged(Value) = .empty,
-tree: Tree = undefined,
+tree: ?Tree = null,
 errors: std.ArrayListUnmanaged(ErrorMsg) = .empty,
 
 pub fn deinit(self: *Yaml, gpa: Allocator) void {
@@ -23,34 +25,28 @@ pub fn deinit(self: *Yaml, gpa: Allocator) void {
         value.deinit(gpa);
     }
     self.docs.deinit(gpa);
-    self.tree.deinit(gpa);
+    if (self.tree) |*tree| {
+        tree.deinit(gpa);
+    }
     for (self.errors.items) |*err| {
         err.deinit(gpa);
     }
     self.errors.deinit(gpa);
 }
 
-pub fn load(gpa: Allocator, source: []const u8) !Yaml {
-    var parser: Parser = .{ .source = source };
+pub fn load(self: *Yaml, gpa: Allocator) !void {
+    var parser: Parser = .{ .ctx = self, .source = self.source };
     defer parser.deinit(gpa);
     try parser.parse(gpa);
 
-    var tree = try parser.toOwnedTree(gpa);
-    errdefer tree.deinit(gpa);
+    self.tree = try parser.toOwnedTree(gpa);
 
-    var docs: std.ArrayListUnmanaged(Value) = .empty;
-    errdefer docs.deinit(gpa);
-    try docs.ensureTotalCapacityPrecise(gpa, tree.docs.len);
+    try self.docs.ensureTotalCapacityPrecise(gpa, self.tree.?.docs.len);
 
-    for (tree.docs) |node| {
-        const value = try Value.fromNode(gpa, tree, node);
-        docs.appendAssumeCapacity(value);
+    for (self.tree.?.docs) |node| {
+        const value = try Value.fromNode(gpa, self.tree.?, node);
+        self.docs.appendAssumeCapacity(value);
     }
-
-    return Yaml{
-        .tree = tree,
-        .docs = docs,
-    };
 }
 
 pub fn parse(self: Yaml, arena: Allocator, comptime T: type) Error!T {
@@ -197,9 +193,9 @@ fn parseArray(self: Yaml, arena: Allocator, comptime T: type, list: List) Error!
 }
 
 pub fn stringify(self: Yaml, writer: anytype) !void {
-    for (self.docs.items, self.tree.docs) |doc, node| {
+    for (self.docs.items, self.tree.?.docs) |doc, node| {
         try writer.writeAll("---");
-        if (self.tree.directive(node)) |directive| {
+        if (self.tree.?.directive(node)) |directive| {
             try writer.print(" !{s}", .{directive});
         }
         try writer.writeByte('\n');
@@ -207,6 +203,60 @@ pub fn stringify(self: Yaml, writer: anytype) !void {
         try writer.writeByte('\n');
     }
     try writer.writeAll("...\n");
+}
+
+pub fn fail(
+    self: *Yaml,
+    gpa: Allocator,
+    line_col: Tree.LineCol,
+    comptime format: []const u8,
+    args: anytype,
+) Allocator.Error!void {
+    const msg = try std.fmt.allocPrint(gpa, format, args);
+    try self.errors.append(gpa, .{
+        .msg = msg,
+        .line_col = line_col,
+    });
+}
+
+pub fn getAllErrorsAlloc(self: *Yaml, gpa: Allocator) Allocator.Error!ErrorBundle {
+    var bundle: ErrorBundle.Wip = undefined;
+    try bundle.init(gpa);
+    defer bundle.deinit();
+    defer {
+        while (self.errors.pop()) |msg| {
+            @constCast(&msg).deinit(gpa);
+        }
+    }
+
+    for (self.errors.items) |msg| {
+        try bundle.addRootErrorMessage(.{
+            .msg = try bundle.addString(msg.msg),
+            .notes_len = 1,
+        });
+        const note = try std.fmt.allocPrint(gpa, "{s} (line:col, {d}:{d})", .{
+            self.getLine(msg.line_col),
+            msg.line_col.line,
+            msg.line_col.col,
+        });
+        errdefer gpa.free(note);
+        const index = try bundle.reserveNotes(1);
+        bundle.extra.items[index] = @intFromEnum(bundle.addErrorMessageAssumeCapacity(.{
+            .msg = try bundle.addString(note),
+        }));
+    }
+
+    return bundle.toOwnedBundle("");
+}
+
+fn getLine(self: Yaml, line_col: Tree.LineCol) []const u8 {
+    var it = mem.splitScalar(u8, self.source, '\n');
+    var line_count: usize = 0;
+    while (it.next()) |line| {
+        defer line_count += 1;
+        if (line_count == line_col.line) return line;
+    }
+    return &.{};
 }
 
 const supportedTruthyBooleanValue: [4][]const u8 = .{ "y", "yes", "on", "true" };
@@ -637,10 +687,10 @@ pub const Value = union(enum) {
 
 pub const ErrorMsg = struct {
     msg: []const u8,
-    token: Token.Index,
+    line_col: Tree.LineCol,
 
     pub fn deinit(err: *ErrorMsg, gpa: Allocator) void {
-        gpa.free(err.mrg);
+        gpa.free(err.msg);
     }
 };
 
