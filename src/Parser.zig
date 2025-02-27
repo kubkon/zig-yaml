@@ -36,8 +36,8 @@ pub fn deinit(self: *Parser, gpa: Allocator) void {
 
 pub fn parse(self: *Parser, gpa: Allocator) ParseError!void {
     var tokenizer = Tokenizer{ .buffer = self.source };
-    var line: usize = 0;
-    var prev_line_last_col: usize = 0;
+    var line: u32 = 0;
+    var prev_line_last_col: u32 = 0;
 
     while (true) {
         const tok = tokenizer.next();
@@ -47,7 +47,7 @@ pub fn parse(self: *Parser, gpa: Allocator) ParseError!void {
             .token = tok,
             .line_col = .{
                 .line = line,
-                .col = tok.loc.start - prev_line_last_col,
+                .col = @intCast(tok.loc.start - prev_line_last_col),
             },
         });
 
@@ -55,7 +55,7 @@ pub fn parse(self: *Parser, gpa: Allocator) ParseError!void {
             .eof => break,
             .new_line => {
                 line += 1;
-                prev_line_last_col = tok.loc.end;
+                prev_line_last_col = @intCast(tok.loc.end);
             },
             else => {},
         }
@@ -216,7 +216,7 @@ fn doc(self: *Parser, gpa: Allocator) ParseError!Node.Index {
         try self.ctx.fail(
             gpa,
             self.tokens.items(.line_col)[@intFromEnum(self.token_it.pos)],
-            "expected end of document but found",
+            "expected end of document",
             .{},
         );
         return error.UnexpectedToken;

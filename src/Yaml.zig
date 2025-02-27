@@ -230,33 +230,60 @@ pub fn getAllErrorsAlloc(self: *Yaml, gpa: Allocator) Allocator.Error!ErrorBundl
     }
 
     for (self.errors.items) |msg| {
+        const line_info = self.getLineInfo(msg.line_col);
         try bundle.addRootErrorMessage(.{
             .msg = try bundle.addString(msg.msg),
-            .notes_len = 1,
+            .src_loc = try bundle.addSourceLocation(.{
+                .src_path = try bundle.addString("(source)"),
+                .line = msg.line_col.line,
+                .column = msg.line_col.col,
+                .span_start = line_info.span_start,
+                .span_main = line_info.span_main,
+                .span_end = line_info.span_end,
+                .source_line = try bundle.addString(line_info.line),
+            }),
+            .notes_len = 0,
         });
-        const note = try std.fmt.allocPrint(gpa, "{s} (line:col, {d}:{d})", .{
-            self.getLine(msg.line_col),
-            msg.line_col.line,
-            msg.line_col.col,
-        });
-        errdefer gpa.free(note);
-        const index = try bundle.reserveNotes(1);
-        bundle.extra.items[index] = @intFromEnum(bundle.addErrorMessageAssumeCapacity(.{
-            .msg = try bundle.addString(note),
-        }));
     }
 
     return bundle.toOwnedBundle("");
 }
 
-fn getLine(self: Yaml, line_col: Tree.LineCol) []const u8 {
-    var it = mem.splitScalar(u8, self.source, '\n');
-    var line_count: usize = 0;
-    while (it.next()) |line| {
-        defer line_count += 1;
-        if (line_count == line_col.line) return line;
-    }
-    return &.{};
+fn getLineInfo(self: Yaml, line_col: Tree.LineCol) struct {
+    line: []const u8,
+    span_start: u32,
+    span_main: u32,
+    span_end: u32,
+} {
+    const line = line: {
+        var it = mem.splitScalar(u8, self.source, '\n');
+        var line_count: usize = 0;
+        const line = while (it.next()) |line| {
+            defer line_count += 1;
+            if (line_count == line_col.line) break line;
+        } else return .{
+            .line = &.{},
+            .span_start = 0,
+            .span_main = 0,
+            .span_end = 0,
+        };
+        break :line line;
+    };
+
+    const span_start: u32 = span_start: {
+        var begin: usize = 0;
+        while (begin < line.len and mem.indexOfScalar(u8, " ", line[begin]) != null) : (begin += 1) {}
+        break :span_start @intCast(begin);
+    };
+
+    const span_end: u32 = @intCast(mem.trimRight(u8, line, " \r\n").len);
+
+    return .{
+        .line = line,
+        .span_start = span_start,
+        .span_main = line_col.col,
+        .span_end = span_end,
+    };
 }
 
 const supportedTruthyBooleanValue: [4][]const u8 = .{ "y", "yes", "on", "true" };
