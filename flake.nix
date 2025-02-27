@@ -23,30 +23,28 @@
       ...
     }@inputs:
     let
-      overlays = [
-        # Other overlays
-        (final: prev: {
-          zigpkgs = inputs.zig.packages.${prev.system};
-          zlspkgs = inputs.zls.packages.${prev.system};
-          pooppkgs = inputs.poop.packages.${prev.system};
-        })
-      ];
-
       # Our supported systems are the same supported systems as the Zig binaries
       systems = builtins.attrNames inputs.zig.packages;
     in
     flake-utils.lib.eachSystem systems (
       system:
       let
-        pkgs = import nixpkgs { inherit overlays system; };
+        pkgs = nixpkgs.legacyPackages.${system};
+        zig = inputs.zig.packages.${system}.master;
+        zls = inputs.zls.packages.${system}.default.overrideAttrs (old: {
+          nativeBuildInputs = [ zig ];
+        });
+        poop = inputs.poop.packages.${system}.default.overrideAttrs (old: {
+          nativeBuildInputs = [ zig ];
+        });
       in
       rec {
         devShells.default = pkgs.mkShell {
           name = "zig-yaml";
-          nativeBuildInputs = with pkgs; [
-            zigpkgs.master
-            zlspkgs.default
-            pooppkgs.default
+          buildInputs = [
+            zig
+            zls
+            poop
           ];
         };
 
