@@ -271,9 +271,8 @@ fn getLineInfo(self: Yaml, line_col: Tree.LineCol) struct {
     };
 
     const span_start: u32 = span_start: {
-        var begin: usize = 0;
-        while (begin < line.len and mem.indexOfScalar(u8, " ", line[begin]) != null) : (begin += 1) {}
-        break :span_start @intCast(begin);
+        const trimmed = mem.trimLeft(u8, line, " ");
+        break :span_start @intCast(mem.indexOf(u8, line, trimmed).?);
     };
 
     const span_end: u32 = @intCast(mem.trimRight(u8, line, " \r\n").len);

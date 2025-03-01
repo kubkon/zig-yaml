@@ -275,7 +275,8 @@ fn map(self: *Parser, gpa: Allocator) ParseError!Node.OptionalIndex {
         log.debug("(map) key {s}@{d}", .{ self.rawString(key_pos, key_pos), key_pos });
 
         // Separator
-        _ = try self.expectToken(.map_value_ind, &.{ .new_line, .comment });
+        _ = self.expectToken(.map_value_ind, &.{ .new_line, .comment }) catch
+            return self.fail(gpa, self.token_it.pos, "expected map separator ':'", .{});
 
         // Parse value
         const value_index = try self.value(gpa);
