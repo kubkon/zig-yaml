@@ -1,4 +1,5 @@
 const std = @import("std");
+const assert = std.debug.assert;
 const build_options = @import("build_options");
 const Yaml = @import("yaml").Yaml;
 
@@ -94,18 +95,15 @@ pub fn main() !void {
 
     var yaml: Yaml = .{ .source = source };
     defer yaml.deinit(allocator);
-    yaml.load(allocator) catch |err| {
-        reportErrors(&yaml, allocator);
-        return err;
+
+    yaml.load(allocator) catch |err| switch (err) {
+        error.ParseFailure => {
+            assert(yaml.parse_errors.errorMessageCount() > 0);
+            yaml.parse_errors.renderToStdErr(.{ .ttyconf = std.io.tty.detectConfig(std.io.getStdErr()) });
+            return error.ParseFailure;
+        },
+        else => return err,
     };
 
     try yaml.stringify(stdout);
-}
-
-fn reportErrors(yaml: *Yaml, allocator: mem.Allocator) void {
-    var errors = yaml.getAllErrorsAlloc(allocator) catch @panic("OOM");
-    defer errors.deinit(allocator);
-    if (errors.errorMessageCount() > 0) {
-        errors.renderToStdErr(.{ .ttyconf = std.io.tty.detectConfig(std.io.getStdErr()) });
-    }
 }

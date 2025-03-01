@@ -18,7 +18,7 @@ const Yaml = @This();
 source: []const u8,
 docs: std.ArrayListUnmanaged(Value) = .empty,
 tree: ?Tree = null,
-errors: std.ArrayListUnmanaged(ErrorMsg) = .empty,
+parse_errors: ErrorBundle = .empty,
 
 pub fn deinit(self: *Yaml, gpa: Allocator) void {
     for (self.docs.items) |*value| {
@@ -28,16 +28,21 @@ pub fn deinit(self: *Yaml, gpa: Allocator) void {
     if (self.tree) |*tree| {
         tree.deinit(gpa);
     }
-    for (self.errors.items) |*err| {
-        err.deinit(gpa);
-    }
-    self.errors.deinit(gpa);
+    self.parse_errors.deinit(gpa);
+    self.* = undefined;
 }
 
 pub fn load(self: *Yaml, gpa: Allocator) !void {
-    var parser: Parser = .{ .ctx = self, .source = self.source };
+    var parser = try Parser.init(gpa, self.source, self);
     defer parser.deinit(gpa);
-    try parser.parse(gpa);
+
+    parser.parse(gpa) catch |err| switch (err) {
+        error.ParseFailure => {
+            self.parse_errors = try parser.errors.toOwnedBundle("");
+            return error.ParseFailure;
+        },
+        else => return err,
+    };
 
     self.tree = try parser.toOwnedTree(gpa);
 
@@ -203,86 +208,6 @@ pub fn stringify(self: Yaml, writer: anytype) !void {
         try writer.writeByte('\n');
     }
     try writer.writeAll("...\n");
-}
-
-pub fn fail(
-    self: *Yaml,
-    gpa: Allocator,
-    line_col: Tree.LineCol,
-    comptime format: []const u8,
-    args: anytype,
-) Allocator.Error!void {
-    const msg = try std.fmt.allocPrint(gpa, format, args);
-    try self.errors.append(gpa, .{
-        .msg = msg,
-        .line_col = line_col,
-    });
-}
-
-pub fn getAllErrorsAlloc(self: *Yaml, gpa: Allocator) Allocator.Error!ErrorBundle {
-    var bundle: ErrorBundle.Wip = undefined;
-    try bundle.init(gpa);
-    defer bundle.deinit();
-    defer {
-        while (self.errors.pop()) |msg| {
-            @constCast(&msg).deinit(gpa);
-        }
-    }
-
-    for (self.errors.items) |msg| {
-        const line_info = self.getLineInfo(msg.line_col);
-        try bundle.addRootErrorMessage(.{
-            .msg = try bundle.addString(msg.msg),
-            .src_loc = try bundle.addSourceLocation(.{
-                .src_path = try bundle.addString("(source)"),
-                .line = msg.line_col.line,
-                .column = msg.line_col.col,
-                .span_start = line_info.span_start,
-                .span_main = line_info.span_main,
-                .span_end = line_info.span_end,
-                .source_line = try bundle.addString(line_info.line),
-            }),
-            .notes_len = 0,
-        });
-    }
-
-    return bundle.toOwnedBundle("");
-}
-
-fn getLineInfo(self: Yaml, line_col: Tree.LineCol) struct {
-    line: []const u8,
-    span_start: u32,
-    span_main: u32,
-    span_end: u32,
-} {
-    const line = line: {
-        var it = mem.splitScalar(u8, self.source, '\n');
-        var line_count: usize = 0;
-        const line = while (it.next()) |line| {
-            defer line_count += 1;
-            if (line_count == line_col.line) break line;
-        } else return .{
-            .line = &.{},
-            .span_start = 0,
-            .span_main = 0,
-            .span_end = 0,
-        };
-        break :line line;
-    };
-
-    const span_start: u32 = span_start: {
-        const trimmed = mem.trimLeft(u8, line, " ");
-        break :span_start @intCast(mem.indexOf(u8, line, trimmed).?);
-    };
-
-    const span_end: u32 = @intCast(mem.trimRight(u8, line, " \r\n").len);
-
-    return .{
-        .line = line,
-        .span_start = span_start,
-        .span_main = line_col.col,
-        .span_end = span_end,
-    };
 }
 
 const supportedTruthyBooleanValue: [4][]const u8 = .{ "y", "yes", "on", "true" };

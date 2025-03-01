@@ -4,6 +4,8 @@ const log = std.log.scoped(.parser);
 const mem = std.mem;
 
 const Allocator = mem.Allocator;
+const ErrorBundle = std.zig.ErrorBundle;
+const LineCol = Tree.LineCol;
 const List = Tree.List;
 const Map = Tree.Map;
 const Node = Tree.Node;
@@ -24,6 +26,13 @@ docs: std.ArrayListUnmanaged(Node.Index) = .empty,
 nodes: std.MultiArrayList(Node) = .empty,
 extra: std.ArrayListUnmanaged(u32) = .empty,
 string_bytes: std.ArrayListUnmanaged(u8) = .empty,
+errors: ErrorBundle.Wip,
+
+pub fn init(gpa: Allocator, source: []const u8, ctx: *Yaml) Allocator.Error!Parser {
+    var self: Parser = .{ .ctx = ctx, .source = source, .errors = undefined };
+    try self.errors.init(gpa);
+    return self;
+}
 
 pub fn deinit(self: *Parser, gpa: Allocator) void {
     self.tokens.deinit(gpa);
@@ -31,6 +40,7 @@ pub fn deinit(self: *Parser, gpa: Allocator) void {
     self.nodes.deinit(gpa);
     self.extra.deinit(gpa);
     self.string_bytes.deinit(gpa);
+    self.errors.deinit();
     self.* = undefined;
 }
 
@@ -711,14 +721,61 @@ fn token(self: Parser, index: Token.Index) Token {
     return self.tokens.items(.token)[@intFromEnum(index)];
 }
 
-fn fail(self: Parser, gpa: Allocator, token_index: Token.Index, comptime format: []const u8, args: anytype) ParseError {
-    try self.ctx.fail(
-        gpa,
-        self.tokens.items(.line_col)[@intFromEnum(token_index)],
-        format,
-        args,
-    );
+fn fail(self: *Parser, gpa: Allocator, token_index: Token.Index, comptime format: []const u8, args: anytype) ParseError {
+    const line_col = self.tokens.items(.line_col)[@intFromEnum(token_index)];
+    const msg = try std.fmt.allocPrint(gpa, format, args);
+    defer gpa.free(msg);
+    const line_info = getLineInfo(self.source, line_col);
+    try self.errors.addRootErrorMessage(.{
+        .msg = try self.errors.addString(msg),
+        .src_loc = try self.errors.addSourceLocation(.{
+            .src_path = try self.errors.addString("(source)"),
+            .line = line_col.line,
+            .column = line_col.col,
+            .span_start = line_info.span_start,
+            .span_main = line_info.span_main,
+            .span_end = line_info.span_end,
+            .source_line = try self.errors.addString(line_info.line),
+        }),
+        .notes_len = 0,
+    });
     return error.ParseFailure;
+}
+
+fn getLineInfo(source: []const u8, line_col: LineCol) struct {
+    line: []const u8,
+    span_start: u32,
+    span_main: u32,
+    span_end: u32,
+} {
+    const line = line: {
+        var it = mem.splitScalar(u8, source, '\n');
+        var line_count: usize = 0;
+        const line = while (it.next()) |line| {
+            defer line_count += 1;
+            if (line_count == line_col.line) break line;
+        } else return .{
+            .line = &.{},
+            .span_start = 0,
+            .span_main = 0,
+            .span_end = 0,
+        };
+        break :line line;
+    };
+
+    const span_start: u32 = span_start: {
+        const trimmed = mem.trimLeft(u8, line, " ");
+        break :span_start @intCast(mem.indexOf(u8, line, trimmed).?);
+    };
+
+    const span_end: u32 = @intCast(mem.trimRight(u8, line, " \r\n").len);
+
+    return .{
+        .line = line,
+        .span_start = span_start,
+        .span_main = line_col.col,
+        .span_end = span_end,
+    };
 }
 
 pub const ParseError = error{
