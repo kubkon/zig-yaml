@@ -213,13 +213,7 @@ fn doc(self: *Parser, gpa: Allocator) ParseError!Node.Index {
             break :footer @enumFromInt(@intFromEnum(pos) - 1);
         }
 
-        try self.ctx.fail(
-            gpa,
-            self.tokens.items(.line_col)[@intFromEnum(self.token_it.pos)],
-            "expected end of document",
-            .{},
-        );
-        return error.UnexpectedToken;
+        return self.fail(gpa, self.token_it.pos, "expected end of document", .{});
     };
 
     log.debug("(doc) end {s}@{d}", .{ @tagName(self.token(node_end).id), node_end });
@@ -716,6 +710,16 @@ fn token(self: Parser, index: Token.Index) Token {
     return self.tokens.items(.token)[@intFromEnum(index)];
 }
 
+fn fail(self: Parser, gpa: Allocator, token_index: Token.Index, comptime format: []const u8, args: anytype) ParseError {
+    try self.ctx.fail(
+        gpa,
+        self.tokens.items(.line_col)[@intFromEnum(token_index)],
+        format,
+        args,
+    );
+    return error.ParseFailure;
+}
+
 pub const ParseError = error{
     InvalidEscapeSequence,
     MalformedYaml,
@@ -723,6 +727,7 @@ pub const ParseError = error{
     UnexpectedEof,
     UnexpectedToken,
     Unhandled,
+    ParseFailure,
 } || Allocator.Error;
 
 test {
