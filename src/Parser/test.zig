@@ -2,9 +2,11 @@ const std = @import("std");
 const mem = std.mem;
 const testing = std.testing;
 
-const Node = Parser.Node;
+const List = Tree.List;
+const Map = Tree.Map;
+const Node = Tree.Node;
 const Parser = @import("../Parser.zig");
-const Tree = Parser.Tree;
+const Tree = @import("../Tree.zig");
 
 fn expectNodeScope(tree: Tree, node: Node.Index, from: usize, to: usize) !void {
     const scope = tree.nodeScope(node);
@@ -12,7 +14,7 @@ fn expectNodeScope(tree: Tree, node: Node.Index, from: usize, to: usize) !void {
     try testing.expectEqual(to, @intFromEnum(scope.end));
 }
 
-fn expectValueMapEntry(tree: Tree, entry_data: Parser.Map.Entry, exp_key: []const u8, exp_value: []const u8) !void {
+fn expectValueMapEntry(tree: Tree, entry_data: Map.Entry, exp_key: []const u8, exp_value: []const u8) !void {
     const key = tree.token(entry_data.key);
     try testing.expectEqual(key.id, .literal);
     try testing.expectEqualStrings(exp_key, tree.rawString(entry_data.key, entry_data.key));
@@ -26,7 +28,7 @@ fn expectValueMapEntry(tree: Tree, entry_data: Parser.Map.Entry, exp_key: []cons
     try testing.expectEqualStrings(exp_value, string);
 }
 
-fn expectStringValueMapEntry(tree: Tree, entry_data: Parser.Map.Entry, exp_key: []const u8, exp_value: []const u8) !void {
+fn expectStringValueMapEntry(tree: Tree, entry_data: Map.Entry, exp_key: []const u8, exp_value: []const u8) !void {
     const key = tree.token(entry_data.key);
     try testing.expectEqual(key.id, .literal);
     try testing.expectEqualStrings(exp_key, tree.rawString(entry_data.key, entry_data.key));
@@ -40,7 +42,7 @@ fn expectStringValueMapEntry(tree: Tree, entry_data: Parser.Map.Entry, exp_key: 
     try testing.expectEqualStrings(exp_value, string);
 }
 
-fn expectValueListEntry(tree: Tree, entry_data: Parser.List.Entry, exp_value: []const u8) !void {
+fn expectValueListEntry(tree: Tree, entry_data: List.Entry, exp_value: []const u8) !void {
     const value = entry_data.node;
     try testing.expectEqual(.value, tree.nodeTag(value));
 
@@ -48,7 +50,7 @@ fn expectValueListEntry(tree: Tree, entry_data: Parser.List.Entry, exp_value: []
     try testing.expectEqualStrings(exp_value, string);
 }
 
-fn expectNestedMapListEntry(tree: Tree, list_entry_data: Parser.List.Entry, exp_key: []const u8, exp_value: []const u8) !void {
+fn expectNestedMapListEntry(tree: Tree, list_entry_data: List.Entry, exp_key: []const u8, exp_value: []const u8) !void {
     const value = list_entry_data.node;
     try testing.expectEqual(.map_single, tree.nodeTag(value));
 
@@ -92,13 +94,13 @@ test "explicit doc" {
 
     try expectNodeScope(tree, map, 5, 14);
 
-    const map_data = tree.extraData(Parser.Map, tree.nodeData(map).extra);
+    const map_data = tree.extraData(Map, tree.nodeData(map).extra);
     try testing.expectEqual(2, map_data.data.map_len);
 
-    var entry_data = tree.extraData(Parser.Map.Entry, map_data.end);
+    var entry_data = tree.extraData(Map.Entry, map_data.end);
     try expectValueMapEntry(tree, entry_data.data, "tbd-version", "4");
 
-    entry_data = tree.extraData(Parser.Map.Entry, entry_data.end);
+    entry_data = tree.extraData(Map.Entry, entry_data.end);
     try expectValueMapEntry(tree, entry_data.data, "abc-version", "5");
 }
 
@@ -131,16 +133,16 @@ test "leaf in quotes" {
 
     try expectNodeScope(tree, map, 0, tree.tokens.len - 2);
 
-    const map_data = tree.extraData(Parser.Map, tree.nodeData(map).extra);
+    const map_data = tree.extraData(Map, tree.nodeData(map).extra);
     try testing.expectEqual(3, map_data.data.map_len);
 
-    var entry_data = tree.extraData(Parser.Map.Entry, map_data.end);
+    var entry_data = tree.extraData(Map.Entry, map_data.end);
     try expectValueMapEntry(tree, entry_data.data, "key1", "no quotes, comma");
 
-    entry_data = tree.extraData(Parser.Map.Entry, entry_data.end);
+    entry_data = tree.extraData(Map.Entry, entry_data.end);
     try expectStringValueMapEntry(tree, entry_data.data, "key2", "single quoted");
 
-    entry_data = tree.extraData(Parser.Map.Entry, entry_data.end);
+    entry_data = tree.extraData(Map.Entry, entry_data.end);
     try expectStringValueMapEntry(tree, entry_data.data, "key3", "double quoted");
 }
 
@@ -174,10 +176,10 @@ test "nested maps" {
 
     try expectNodeScope(tree, map, 0, tree.tokens.len - 2);
 
-    const map_data = tree.extraData(Parser.Map, tree.nodeData(map).extra);
+    const map_data = tree.extraData(Map, tree.nodeData(map).extra);
     try testing.expectEqual(2, map_data.data.map_len);
 
-    var entry_data = tree.extraData(Parser.Map.Entry, map_data.end);
+    var entry_data = tree.extraData(Map.Entry, map_data.end);
     {
         const key = tree.token(entry_data.data.key);
         try testing.expectEqual(key.id, .literal);
@@ -191,17 +193,17 @@ test "nested maps" {
 
         try expectNodeScope(tree, nested_map, 4, 16);
 
-        const nested_map_data = tree.extraData(Parser.Map, tree.nodeData(nested_map).extra);
+        const nested_map_data = tree.extraData(Map, tree.nodeData(nested_map).extra);
         try testing.expectEqual(2, nested_map_data.data.map_len);
 
-        var nested_entry_data = tree.extraData(Parser.Map.Entry, nested_map_data.end);
+        var nested_entry_data = tree.extraData(Map.Entry, nested_map_data.end);
         try expectValueMapEntry(tree, nested_entry_data.data, "key1_1", "value1_1");
 
-        nested_entry_data = tree.extraData(Parser.Map.Entry, nested_entry_data.end);
+        nested_entry_data = tree.extraData(Map.Entry, nested_entry_data.end);
         try expectValueMapEntry(tree, nested_entry_data.data, "key1_2", "value1_2");
     }
 
-    entry_data = tree.extraData(Parser.Map.Entry, entry_data.end);
+    entry_data = tree.extraData(Map.Entry, entry_data.end);
     try expectValueMapEntry(tree, entry_data.data, "key2", "value2");
 }
 
@@ -248,16 +250,16 @@ test "map of list of values" {
 
         try expectNodeScope(tree, nested_list, 4, tree.tokens.len - 2);
 
-        const nested_list_data = tree.extraData(Parser.List, tree.nodeData(nested_list).extra);
+        const nested_list_data = tree.extraData(List, tree.nodeData(nested_list).extra);
         try testing.expectEqual(3, nested_list_data.data.list_len);
 
-        var nested_entry_data = tree.extraData(Parser.List.Entry, nested_list_data.end);
+        var nested_entry_data = tree.extraData(List.Entry, nested_list_data.end);
         try expectValueListEntry(tree, nested_entry_data.data, "0");
 
-        nested_entry_data = tree.extraData(Parser.List.Entry, nested_entry_data.end);
+        nested_entry_data = tree.extraData(List.Entry, nested_entry_data.end);
         try expectValueListEntry(tree, nested_entry_data.data, "1");
 
-        nested_entry_data = tree.extraData(Parser.List.Entry, nested_entry_data.end);
+        nested_entry_data = tree.extraData(List.Entry, nested_entry_data.end);
         try expectValueListEntry(tree, nested_entry_data.data, "2");
     }
 }
@@ -305,16 +307,16 @@ test "map of list of maps" {
 
         try expectNodeScope(tree, nested_list, 3, tree.tokens.len - 2);
 
-        const nested_list_data = tree.extraData(Parser.List, tree.nodeData(nested_list).extra);
+        const nested_list_data = tree.extraData(List, tree.nodeData(nested_list).extra);
         try testing.expectEqual(3, nested_list_data.data.list_len);
 
-        var nested_entry_data = tree.extraData(Parser.List.Entry, nested_list_data.end);
+        var nested_entry_data = tree.extraData(List.Entry, nested_list_data.end);
         try expectNestedMapListEntry(tree, nested_entry_data.data, "key2", "value2");
 
-        nested_entry_data = tree.extraData(Parser.List.Entry, nested_entry_data.end);
+        nested_entry_data = tree.extraData(List.Entry, nested_entry_data.end);
         try expectNestedMapListEntry(tree, nested_entry_data.data, "key3", "value3");
 
-        nested_entry_data = tree.extraData(Parser.List.Entry, nested_entry_data.end);
+        nested_entry_data = tree.extraData(List.Entry, nested_entry_data.end);
         try expectNestedMapListEntry(tree, nested_entry_data.data, "key4", "value4");
     }
 }
@@ -371,13 +373,13 @@ test "map of list of maps with inner list" {
             const nested_map = nested_list_data.el1;
             try testing.expectEqual(.map_many, tree.nodeTag(nested_map));
 
-            const nested_map_data = tree.extraData(Parser.Map, tree.nodeData(nested_map).extra);
+            const nested_map_data = tree.extraData(Map, tree.nodeData(nested_map).extra);
             try testing.expectEqual(2, nested_map_data.data.map_len);
 
-            var nested_nested_entry_data = tree.extraData(Parser.Map.Entry, nested_map_data.end);
+            var nested_nested_entry_data = tree.extraData(Map.Entry, nested_map_data.end);
             try expectValueMapEntry(tree, nested_nested_entry_data.data, "a", "foo");
 
-            nested_nested_entry_data = tree.extraData(Parser.Map.Entry, nested_nested_entry_data.end);
+            nested_nested_entry_data = tree.extraData(Map.Entry, nested_nested_entry_data.end);
             {
                 const nested_nested_map_entry = nested_nested_entry_data.data;
                 const nested_nested_key = tree.token(nested_nested_map_entry.key);
@@ -398,13 +400,13 @@ test "map of list of maps with inner list" {
             const nested_map = nested_list_data.el2;
             try testing.expectEqual(.map_many, tree.nodeTag(nested_map));
 
-            const nested_map_data = tree.extraData(Parser.Map, tree.nodeData(nested_map).extra);
+            const nested_map_data = tree.extraData(Map, tree.nodeData(nested_map).extra);
             try testing.expectEqual(2, nested_map_data.data.map_len);
 
-            var nested_nested_entry_data = tree.extraData(Parser.Map.Entry, nested_map_data.end);
+            var nested_nested_entry_data = tree.extraData(Map.Entry, nested_map_data.end);
             try expectValueMapEntry(tree, nested_nested_entry_data.data, "b", "bar");
 
-            nested_nested_entry_data = tree.extraData(Parser.Map.Entry, nested_nested_entry_data.end);
+            nested_nested_entry_data = tree.extraData(Map.Entry, nested_nested_entry_data.end);
             {
                 const nested_nested_map_entry = nested_nested_entry_data.data;
                 const nested_nested_key = tree.token(nested_nested_map_entry.key);
@@ -450,63 +452,63 @@ test "list of lists" {
 
     try expectNodeScope(tree, list, 0, tree.tokens.len - 2);
 
-    const list_data = tree.extraData(Parser.List, tree.nodeData(list).extra);
+    const list_data = tree.extraData(List, tree.nodeData(list).extra);
     try testing.expectEqual(3, list_data.data.list_len);
 
-    var entry_data = tree.extraData(Parser.List.Entry, list_data.end);
+    var entry_data = tree.extraData(List.Entry, list_data.end);
     {
         const nested_list = entry_data.data.node;
 
         try expectNodeScope(tree, nested_list, 1, 11);
 
-        const nested_list_data = tree.extraData(Parser.List, tree.nodeData(nested_list).extra);
+        const nested_list_data = tree.extraData(List, tree.nodeData(nested_list).extra);
         try testing.expectEqual(3, nested_list_data.data.list_len);
 
-        var nested_entry_data = tree.extraData(Parser.List.Entry, nested_list_data.end);
+        var nested_entry_data = tree.extraData(List.Entry, nested_list_data.end);
         try expectValueListEntry(tree, nested_entry_data.data, "name");
 
-        nested_entry_data = tree.extraData(Parser.List.Entry, nested_entry_data.end);
+        nested_entry_data = tree.extraData(List.Entry, nested_entry_data.end);
         try expectValueListEntry(tree, nested_entry_data.data, "hr");
 
-        nested_entry_data = tree.extraData(Parser.List.Entry, nested_entry_data.end);
+        nested_entry_data = tree.extraData(List.Entry, nested_entry_data.end);
         try expectValueListEntry(tree, nested_entry_data.data, "avg");
     }
 
-    entry_data = tree.extraData(Parser.List.Entry, entry_data.end);
+    entry_data = tree.extraData(List.Entry, entry_data.end);
     {
         const nested_list = entry_data.data.node;
 
         try expectNodeScope(tree, nested_list, 14, 25);
 
-        const nested_list_data = tree.extraData(Parser.List, tree.nodeData(nested_list).extra);
+        const nested_list_data = tree.extraData(List, tree.nodeData(nested_list).extra);
         try testing.expectEqual(3, nested_list_data.data.list_len);
 
-        var nested_entry_data = tree.extraData(Parser.List.Entry, nested_list_data.end);
+        var nested_entry_data = tree.extraData(List.Entry, nested_list_data.end);
         try expectValueListEntry(tree, nested_entry_data.data, "Mark McGwire");
 
-        nested_entry_data = tree.extraData(Parser.List.Entry, nested_entry_data.end);
+        nested_entry_data = tree.extraData(List.Entry, nested_entry_data.end);
         try expectValueListEntry(tree, nested_entry_data.data, "65");
 
-        nested_entry_data = tree.extraData(Parser.List.Entry, nested_entry_data.end);
+        nested_entry_data = tree.extraData(List.Entry, nested_entry_data.end);
         try expectValueListEntry(tree, nested_entry_data.data, "0.278");
     }
 
-    entry_data = tree.extraData(Parser.List.Entry, entry_data.end);
+    entry_data = tree.extraData(List.Entry, entry_data.end);
     {
         const nested_list = entry_data.data.node;
 
         try expectNodeScope(tree, nested_list, 28, 39);
 
-        const nested_list_data = tree.extraData(Parser.List, tree.nodeData(nested_list).extra);
+        const nested_list_data = tree.extraData(List, tree.nodeData(nested_list).extra);
         try testing.expectEqual(3, nested_list_data.data.list_len);
 
-        var nested_entry_data = tree.extraData(Parser.List.Entry, nested_list_data.end);
+        var nested_entry_data = tree.extraData(List.Entry, nested_list_data.end);
         try expectValueListEntry(tree, nested_entry_data.data, "Sammy Sosa");
 
-        nested_entry_data = tree.extraData(Parser.List.Entry, nested_entry_data.end);
+        nested_entry_data = tree.extraData(List.Entry, nested_entry_data.end);
         try expectValueListEntry(tree, nested_entry_data.data, "63");
 
-        nested_entry_data = tree.extraData(Parser.List.Entry, nested_entry_data.end);
+        nested_entry_data = tree.extraData(List.Entry, nested_entry_data.end);
         try expectValueListEntry(tree, nested_entry_data.data, "0.288");
     }
 }
@@ -536,16 +538,16 @@ test "inline list" {
 
     try expectNodeScope(tree, list, 0, tree.tokens.len - 2);
 
-    const list_data = tree.extraData(Parser.List, tree.nodeData(list).extra);
+    const list_data = tree.extraData(List, tree.nodeData(list).extra);
     try testing.expectEqual(3, list_data.data.list_len);
 
-    var entry_data = tree.extraData(Parser.List.Entry, list_data.end);
+    var entry_data = tree.extraData(List.Entry, list_data.end);
     try expectValueListEntry(tree, entry_data.data, "name");
 
-    entry_data = tree.extraData(Parser.List.Entry, entry_data.end);
+    entry_data = tree.extraData(List.Entry, entry_data.end);
     try expectValueListEntry(tree, entry_data.data, "hr");
 
-    entry_data = tree.extraData(Parser.List.Entry, entry_data.end);
+    entry_data = tree.extraData(List.Entry, entry_data.end);
     try expectValueListEntry(tree, entry_data.data, "avg");
 }
 
@@ -590,16 +592,16 @@ test "inline list as mapping value" {
 
     try expectNodeScope(tree, nested_list, 4, tree.tokens.len - 2);
 
-    const nested_list_data = tree.extraData(Parser.List, tree.nodeData(nested_list).extra);
+    const nested_list_data = tree.extraData(List, tree.nodeData(nested_list).extra);
     try testing.expectEqual(3, nested_list_data.data.list_len);
 
-    var nested_entry_data = tree.extraData(Parser.List.Entry, nested_list_data.end);
+    var nested_entry_data = tree.extraData(List.Entry, nested_list_data.end);
     try expectValueListEntry(tree, nested_entry_data.data, "name");
 
-    nested_entry_data = tree.extraData(Parser.List.Entry, nested_entry_data.end);
+    nested_entry_data = tree.extraData(List.Entry, nested_entry_data.end);
     try expectValueListEntry(tree, nested_entry_data.data, "hr");
 
-    nested_entry_data = tree.extraData(Parser.List.Entry, nested_entry_data.end);
+    nested_entry_data = tree.extraData(List.Entry, nested_entry_data.end);
     try expectValueListEntry(tree, nested_entry_data.data, "avg");
 }
 

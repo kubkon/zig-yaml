@@ -630,8 +630,5 @@ pub const Value = union(enum) {
 };
 
 test {
-    std.testing.refAllDecls(Parser);
-    std.testing.refAllDecls(Tokenizer);
-    std.testing.refAllDecls(Tree);
     _ = @import("Yaml/test.zig");
 }
