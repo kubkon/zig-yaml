@@ -274,11 +274,7 @@ fn map(self: *Parser, gpa: Allocator) ParseError!Node.OptionalIndex {
             .flow_map_end => {
                 break;
             },
-            else => {
-                log.err("Unhandled token in map: {}", .{key});
-                // TODO key not being a literal
-                return error.Unhandled;
-            },
+            else => return self.fail(gpa, self.token_it.pos, "unexpected token for 'key': {}", .{key}),
         }
 
         log.debug("(map) key {s}@{d}", .{ self.rawString(key_pos, key_pos), key_pos });
@@ -783,7 +779,6 @@ pub const ParseError = error{
     NestedDocuments,
     UnexpectedEof,
     UnexpectedToken,
-    Unhandled,
     ParseFailure,
 } || Allocator.Error;
 
