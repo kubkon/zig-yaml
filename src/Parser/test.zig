@@ -69,7 +69,7 @@ test "explicit doc" {
         \\...
     ;
 
-    var parser: Parser = .{ .source = source };
+    var parser = try Parser.init(testing.allocator, source);
     defer parser.deinit(testing.allocator);
     try parser.parse(testing.allocator);
 
@@ -111,7 +111,7 @@ test "leaf in quotes" {
         \\key3: "double quoted"
     ;
 
-    var parser: Parser = .{ .source = source };
+    var parser = try Parser.init(testing.allocator, source);
     defer parser.deinit(testing.allocator);
     try parser.parse(testing.allocator);
 
@@ -154,7 +154,7 @@ test "nested maps" {
         \\key2   : value2
     ;
 
-    var parser: Parser = .{ .source = source };
+    var parser = try Parser.init(testing.allocator, source);
     defer parser.deinit(testing.allocator);
     try parser.parse(testing.allocator);
 
@@ -215,7 +215,7 @@ test "map of list of values" {
         \\  - 2
     ;
 
-    var parser: Parser = .{ .source = source };
+    var parser = try Parser.init(testing.allocator, source);
     defer parser.deinit(testing.allocator);
     try parser.parse(testing.allocator);
 
@@ -272,7 +272,7 @@ test "map of list of maps" {
         \\- key4 : value4
     ;
 
-    var parser: Parser = .{ .source = source };
+    var parser = try Parser.init(testing.allocator, source);
     defer parser.deinit(testing.allocator);
     try parser.parse(testing.allocator);
 
@@ -332,7 +332,7 @@ test "map of list of maps with inner list" {
         \\       - name: inner-bar
     ;
 
-    var parser: Parser = .{ .source = source };
+    var parser = try Parser.init(testing.allocator, source);
     defer parser.deinit(testing.allocator);
     try parser.parse(testing.allocator);
 
@@ -432,7 +432,7 @@ test "list of lists" {
         \\- [Sammy Sosa   , 63, 0.288]
     ;
 
-    var parser: Parser = .{ .source = source };
+    var parser = try Parser.init(testing.allocator, source);
     defer parser.deinit(testing.allocator);
     try parser.parse(testing.allocator);
 
@@ -518,7 +518,7 @@ test "inline list" {
         \\[name        , hr, avg  ]
     ;
 
-    var parser: Parser = .{ .source = source };
+    var parser = try Parser.init(testing.allocator, source);
     defer parser.deinit(testing.allocator);
     try parser.parse(testing.allocator);
 
@@ -558,7 +558,7 @@ test "inline list as mapping value" {
         \\        hr, avg  ]
     ;
 
-    var parser: Parser = .{ .source = source };
+    var parser = try Parser.init(testing.allocator, source);
     defer parser.deinit(testing.allocator);
     try parser.parse(testing.allocator);
 
@@ -606,13 +606,13 @@ test "inline list as mapping value" {
 }
 
 fn parseSuccess(comptime source: []const u8) !void {
-    var parser: Parser = .{ .source = source };
+    var parser = try Parser.init(testing.allocator, source);
     defer parser.deinit(testing.allocator);
     try parser.parse(testing.allocator);
 }
 
 fn parseError(comptime source: []const u8, err: Parser.ParseError) !void {
-    var parser: Parser = .{ .source = source };
+    var parser = try Parser.init(testing.allocator, source);
     defer parser.deinit(testing.allocator);
     try testing.expectError(err, parser.parse(testing.allocator));
 }
@@ -647,10 +647,15 @@ test "empty doc with spaces and comments" {
 }
 
 test "comment between --- and ! in document start" {
-    try parseError(
+    try parseError2(
         \\--- # what is it?
         \\!
-    , error.UnexpectedToken);
+    ,
+        \\(memory):2:1: error: expected end of document
+        \\!
+        \\^
+        \\
+    , .{});
 }
 
 test "correct doc start with tag" {
@@ -701,11 +706,16 @@ test "explicit doc with a single string is ok" {
 }
 
 test "doc with two string is bad" {
-    try parseError(
+    try parseError2(
         \\first
         \\second
         \\# this should fail already
-    , error.UnexpectedToken);
+    ,
+        \\(memory):2:1: error: expected end of document
+        \\second
+        \\^~~~~~
+        \\
+    , .{});
 }
 
 test "single quote string can have new lines" {
@@ -758,10 +768,15 @@ test "map of maps" {
 }
 
 test "map value indicator needs to be on the same line" {
-    try parseError(
+    try parseError2(
         \\a
         \\  : b
-    , error.UnexpectedToken);
+    ,
+        \\(memory):2:3: error: expected end of document
+        \\  : b
+        \\  ^~~
+        \\
+    , .{});
 }
 
 test "value needs to be indented" {
@@ -791,10 +806,15 @@ test "simple list" {
 }
 
 test "list indentation matters" {
-    try parseError(
+    try parseError2(
         \\  - a
         \\- b
-    , error.UnexpectedToken);
+    ,
+        \\(memory):2:1: error: expected end of document
+        \\- b
+        \\^~~
+        \\
+    , .{});
 
     try parseSuccess(
         \\- a
