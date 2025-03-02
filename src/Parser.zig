@@ -293,7 +293,7 @@ fn map(self: *Parser, gpa: Allocator) ParseError!Node.OptionalIndex {
             }
             if (self.nodes.items(.tag)[@intFromEnum(v)] == .value) {
                 if (self.getCol(value_start) == self.getCol(key_pos)) {
-                    return error.MalformedYaml;
+                    return self.fail(gpa, value_start, "'value' in map should have more indentation than the 'key'", .{});
                 }
             }
         }

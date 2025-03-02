@@ -780,10 +780,15 @@ test "map value indicator needs to be on the same line" {
 }
 
 test "value needs to be indented" {
-    try parseError(
+    try parseError2(
         \\a:
         \\b
-    , error.MalformedYaml);
+    ,
+        \\(memory):2:1: error: 'value' in map should have more indentation than the 'key'
+        \\b
+        \\^
+        \\
+    , .{});
 }
 
 test "comment between a key and a value is fine" {
