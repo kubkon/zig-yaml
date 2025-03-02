@@ -208,7 +208,10 @@ fn doc(self: *Parser, gpa: Allocator) ParseError!Node.Index {
     // Parse footer
     const node_end: Token.Index = footer: {
         if (self.eatToken(.doc_end, &.{})) |pos| {
-            if (!is_explicit) return error.UnexpectedToken;
+            if (!is_explicit) {
+                self.token_it.seekBy(-1);
+                return self.fail(gpa, self.token_it.pos, "missing explicit document open marker '---'", .{});
+            }
             if (self.getCol(pos) > 0) return error.MalformedYaml;
             break :footer pos;
         }
