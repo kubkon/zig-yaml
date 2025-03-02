@@ -18,7 +18,6 @@ const String = Tree.String;
 const Parser = @This();
 const Yaml = @import("Yaml.zig");
 
-ctx: *Yaml,
 source: []const u8,
 tokens: std.MultiArrayList(TokenWithLineCol) = .empty,
 token_it: TokenIterator = undefined,
@@ -28,8 +27,8 @@ extra: std.ArrayListUnmanaged(u32) = .empty,
 string_bytes: std.ArrayListUnmanaged(u8) = .empty,
 errors: ErrorBundle.Wip,
 
-pub fn init(gpa: Allocator, source: []const u8, ctx: *Yaml) Allocator.Error!Parser {
-    var self: Parser = .{ .ctx = ctx, .source = source, .errors = undefined };
+pub fn init(gpa: Allocator, source: []const u8) Allocator.Error!Parser {
+    var self: Parser = .{ .source = source, .errors = undefined };
     try self.errors.init(gpa);
     return self;
 }
@@ -729,7 +728,7 @@ fn fail(self: *Parser, gpa: Allocator, token_index: Token.Index, comptime format
     try self.errors.addRootErrorMessage(.{
         .msg = try self.errors.addString(msg),
         .src_loc = try self.errors.addSourceLocation(.{
-            .src_path = try self.errors.addString("(source)"),
+            .src_path = try self.errors.addString("(memory)"),
             .line = line_col.line,
             .column = line_col.col,
             .span_start = line_info.span_start,

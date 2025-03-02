@@ -617,6 +617,26 @@ fn parseError(comptime source: []const u8, err: Parser.ParseError) !void {
     try testing.expectError(err, parser.parse(testing.allocator));
 }
 
+fn parseError2(source: []const u8, comptime format: []const u8, args: anytype) !void {
+    var parser = try Parser.init(testing.allocator, source);
+    defer parser.deinit(testing.allocator);
+
+    const res = parser.parse(testing.allocator);
+    try testing.expectError(error.ParseFailure, res);
+
+    var bundle = try parser.errors.toOwnedBundle("");
+    defer bundle.deinit(testing.allocator);
+    try testing.expect(bundle.errorMessageCount() > 0);
+
+    var given: std.ArrayListUnmanaged(u8) = .empty;
+    defer given.deinit(testing.allocator);
+    try bundle.renderToWriter(.{ .ttyconf = .no_color }, given.writer(testing.allocator));
+
+    const expected = try std.fmt.allocPrint(testing.allocator, format, args);
+    defer testing.allocator.free(expected);
+    try testing.expectEqualStrings(expected, given.items);
+}
+
 test "empty doc with spaces and comments" {
     try parseSuccess(
         \\
@@ -839,4 +859,28 @@ test "mixed ints with floats in a list" {
     try parseSuccess(
         \\[0, 1.0]
     );
+}
+
+test "expect end of document" {
+    try parseError2(
+        \\  key1: value1
+        \\key2: value2
+    ,
+        \\(memory):2:1: error: expected end of document
+        \\key2: value2
+        \\^~~~~~~~~~~~
+        \\
+    , .{});
+}
+
+test "expect map separator" {
+    try parseError2(
+        \\key1: value1
+        \\key2
+    ,
+        \\(memory):2:5: error: expected map separator ':'
+        \\key2
+        \\~~~~^
+        \\
+    , .{});
 }

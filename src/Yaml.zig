@@ -33,7 +33,7 @@ pub fn deinit(self: *Yaml, gpa: Allocator) void {
 }
 
 pub fn load(self: *Yaml, gpa: Allocator) !void {
-    var parser = try Parser.init(gpa, self.source, self);
+    var parser = try Parser.init(gpa, self.source);
     defer parser.deinit(gpa);
 
     parser.parse(gpa) catch |err| switch (err) {
