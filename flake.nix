@@ -5,7 +5,7 @@
     nixpkgs.url = "github:nixos/nixpkgs/nixos-24.11";
     flake-utils.url = "github:numtide/flake-utils";
     zig.url = "github:mitchellh/zig-overlay";
-    # zls.url = "github:zigtools/zls"; TODO re-enable once it's migrated to new build.zig.zon changes
+    zls.url = "github:zigtools/zls";
     poop.url = "github:kubkon/poop/nix";
 
     # Used for shell.nix
@@ -31,9 +31,9 @@
       let
         pkgs = nixpkgs.legacyPackages.${system};
         zig = inputs.zig.packages.${system}.master;
-        # zls = inputs.zls.packages.${system}.default.overrideAttrs (old: {
-        #   nativeBuildInputs = [ zig ];
-        # });
+        zls = inputs.zls.packages.${system}.default.overrideAttrs (old: {
+          nativeBuildInputs = [ zig ];
+        });
         poop = inputs.poop.packages.${system}.default.overrideAttrs (old: {
           nativeBuildInputs = [ zig ];
         });
@@ -45,7 +45,7 @@
           name = "zig-yaml";
           buildInputs = [
             zig
-            # zls
+            zls
           ] ++ linuxSpecific;
         };
 
