@@ -37,6 +37,8 @@
         poop = inputs.poop.packages.${system}.default.overrideAttrs (old: {
           nativeBuildInputs = [ zig ];
         });
+
+        linuxSpecific = pkgs.lib.optionals pkgs.stdenv.isLinux [ poop ];
       in
       rec {
         devShells.default = pkgs.mkShell {
@@ -44,8 +46,7 @@
           buildInputs = [
             zig
             # zls
-            poop
-          ];
+          ] ++ linuxSpecific;
         };
 
         # For compatibility with older versions of the `nix` binary
