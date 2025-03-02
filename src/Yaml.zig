@@ -539,7 +539,7 @@ pub const Value = union(enum) {
         }
     }
 
-    fn encode(arena: Allocator, input: anytype) YamlError!?Value {
+    pub fn encode(arena: Allocator, input: anytype) YamlError!?Value {
         switch (@typeInfo(@TypeOf(input))) {
             .comptime_int,
             .int,
