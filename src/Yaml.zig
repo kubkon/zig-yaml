@@ -6,45 +6,52 @@ const log = std.log.scoped(.yaml);
 
 const Allocator = mem.Allocator;
 const ArenaAllocator = std.heap.ArenaAllocator;
-const Tokenizer = @import("Tokenizer.zig");
-const Parser = @import("Parser.zig");
+const ErrorBundle = std.zig.ErrorBundle;
 const Node = Tree.Node;
-const Tree = @import("Tree.zig");
+const Parser = @import("Parser.zig");
 const ParseError = Parser.ParseError;
+const Tokenizer = @import("Tokenizer.zig");
+const Token = Tokenizer.Token;
+const Tree = @import("Tree.zig");
 const Yaml = @This();
 
+source: []const u8,
 docs: std.ArrayListUnmanaged(Value) = .empty,
-tree: Tree = undefined,
+tree: ?Tree = null,
+parse_errors: ErrorBundle = .empty,
 
 pub fn deinit(self: *Yaml, gpa: Allocator) void {
     for (self.docs.items) |*value| {
         value.deinit(gpa);
     }
     self.docs.deinit(gpa);
-    self.tree.deinit(gpa);
+    if (self.tree) |*tree| {
+        tree.deinit(gpa);
+    }
+    self.parse_errors.deinit(gpa);
+    self.* = undefined;
 }
 
-pub fn load(gpa: Allocator, source: []const u8) !Yaml {
-    var parser: Parser = .{ .source = source };
+pub fn load(self: *Yaml, gpa: Allocator) !void {
+    var parser = try Parser.init(gpa, self.source);
     defer parser.deinit(gpa);
-    try parser.parse(gpa);
 
-    var tree = try parser.toOwnedTree(gpa);
-    errdefer tree.deinit(gpa);
-
-    var docs: std.ArrayListUnmanaged(Value) = .empty;
-    errdefer docs.deinit(gpa);
-    try docs.ensureTotalCapacityPrecise(gpa, tree.docs.len);
-
-    for (tree.docs) |node| {
-        const value = try Value.fromNode(gpa, tree, node);
-        docs.appendAssumeCapacity(value);
-    }
-
-    return Yaml{
-        .tree = tree,
-        .docs = docs,
+    parser.parse(gpa) catch |err| switch (err) {
+        error.ParseFailure => {
+            self.parse_errors = try parser.errors.toOwnedBundle("");
+            return error.ParseFailure;
+        },
+        else => return err,
     };
+
+    self.tree = try parser.toOwnedTree(gpa);
+
+    try self.docs.ensureTotalCapacityPrecise(gpa, self.tree.?.docs.len);
+
+    for (self.tree.?.docs) |node| {
+        const value = try Value.fromNode(gpa, self.tree.?, node);
+        self.docs.appendAssumeCapacity(value);
+    }
 }
 
 pub fn parse(self: Yaml, arena: Allocator, comptime T: type) Error!T {
@@ -191,9 +198,9 @@ fn parseArray(self: Yaml, arena: Allocator, comptime T: type, list: List) Error!
 }
 
 pub fn stringify(self: Yaml, writer: anytype) !void {
-    for (self.docs.items, self.tree.docs) |doc, node| {
+    for (self.docs.items, self.tree.?.docs) |doc, node| {
         try writer.writeAll("---");
-        if (self.tree.directive(node)) |directive| {
+        if (self.tree.?.directive(node)) |directive| {
             try writer.print(" !{s}", .{directive});
         }
         try writer.writeByte('\n');
@@ -626,6 +633,15 @@ pub const Value = union(enum) {
                 @compileError("Unhandled type: {s}" ++ @typeName(@TypeOf(input)));
             },
         }
+    }
+};
+
+pub const ErrorMsg = struct {
+    msg: []const u8,
+    line_col: Tree.LineCol,
+
+    pub fn deinit(err: *ErrorMsg, gpa: Allocator) void {
+        gpa.free(err.msg);
     }
 };
 

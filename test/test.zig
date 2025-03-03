@@ -15,7 +15,10 @@ fn loadFromFile(file_path: []const u8) !Yaml {
     const source = try file.readToEndAlloc(gpa, std.math.maxInt(u32));
     defer gpa.free(source);
 
-    return Yaml.load(gpa, source);
+    var yaml: Yaml = .{ .source = source };
+    errdefer yaml.deinit(gpa);
+    try yaml.load(gpa);
+    return yaml;
 }
 
 test "simple" {
