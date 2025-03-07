@@ -51,7 +51,8 @@ If you want to use the parser as a library, add it as a package the usual way, a
 
 ```zig
 const std = @import("std");
-const yaml = @import("yaml");
+const Yaml = @import("yaml").Yaml;
+const gpa = std.testing.allocator;
 
 const source =
     \\names: [ John Doe, MacIntosh, Jane Austin ]
@@ -66,13 +67,15 @@ const source =
     \\           19.78      , 17 ,
     \\           21 ]
 ;
+
+var yaml: Yaml = .{ .source = source };
+defer yaml.deinit(gpa);
 ```
 
 1. For untyped, raw representation of YAML, use `Yaml.load`:
 
 ```zig
-var untyped = try yaml.Yaml.load(std.testing.allocator, source);
-defer untyped.deinit(std.testing.allocator);
+try yaml.load(gpa, source);
 
 try std.testing.expectEqual(untyped.docs.items.len, 1);
 
@@ -84,9 +87,6 @@ try std.testing.expectEqual(map.get("names").?.list.len, 3);
 2. For typed representation of YAML, use `Yaml.parse`:
 
 ```zig
-var typed = try yaml.Yaml.load(std.testing.allocator, source);
-defer typed.deinit(std.testing.allocator);
-
 const Simple = struct {
     names: []const []const u8,
     numbers: []const i16,
@@ -97,17 +97,17 @@ const Simple = struct {
     finally: [4]f16,
 };
 
-var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+var arena = std.heap.ArenaAllocator.init(gpa);
 defer arena.deinit();
 
-const simple = try typed.parse(arena.allocator(), Simple);
+const simple = try yaml.parse(arena.allocator(), Simple);
 try std.testing.expectEqual(simple.names.len, 3);
 ```
 
 3. To convert `Yaml` structure back into text representation, use `Yaml.stringify`:
 
 ```zig
-try untyped.stringify(std.io.getStdOut().writer());
+try yaml.stringify(std.io.getStdOut().writer());
 ```
 
 which should write the following output to standard output when run:
@@ -119,6 +119,28 @@ nested:
     some: one
     wick: john doe
 finally: [ 8.17, 19.78, 17, 21  ]
+```
+
+### Error handling
+
+The library currently reports user-friendly, more informative parsing errors only which are stored out-of-band.
+They can be accessed via `Yaml.parse_errors: std.zig.ErrorBundle`, but typically you would only hook them up to
+your error reporting setup.
+
+For example, `example/yaml.zig` binary does it like so:
+
+```zig
+var yaml: Yaml = .{ .source = source };
+defer yaml.deinit(allocator);
+
+yaml.load(allocator) catch |err| switch (err) {
+    error.ParseFailure => {
+        assert(yaml.parse_errors.errorMessageCount() > 0);
+        yaml.parse_errors.renderToStdErr(.{ .ttyconf = std.io.tty.detectConfig(std.io.getStdErr()) });
+        return error.ParseFailure;
+    },
+    else => return err,
+};
 ```
 
 ## Running YAML spec test suite

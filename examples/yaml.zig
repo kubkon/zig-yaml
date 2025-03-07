@@ -1,6 +1,7 @@
 const std = @import("std");
+const assert = std.debug.assert;
 const build_options = @import("build_options");
-const yaml = @import("yaml");
+const Yaml = @import("yaml").Yaml;
 
 const io = std.io;
 const mem = std.mem;
@@ -92,6 +93,17 @@ pub fn main() !void {
 
     const source = try file.readToEndAlloc(allocator, std.math.maxInt(u32));
 
-    var parsed = try yaml.Yaml.load(allocator, source);
-    try parsed.stringify(stdout);
+    var yaml: Yaml = .{ .source = source };
+    defer yaml.deinit(allocator);
+
+    yaml.load(allocator) catch |err| switch (err) {
+        error.ParseFailure => {
+            assert(yaml.parse_errors.errorMessageCount() > 0);
+            yaml.parse_errors.renderToStdErr(.{ .ttyconf = std.io.tty.detectConfig(std.io.getStdErr()) });
+            return error.ParseFailure;
+        },
+        else => return err,
+    };
+
+    try yaml.stringify(stdout);
 }

@@ -241,8 +241,8 @@ pub const String = struct {
 
 /// Tracked line-column information for each Token.
 pub const LineCol = struct {
-    line: usize,
-    col: usize,
+    line: u32,
+    col: u32,
 };
 
 /// Token with line-column information.

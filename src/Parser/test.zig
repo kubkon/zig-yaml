@@ -69,7 +69,7 @@ test "explicit doc" {
         \\...
     ;
 
-    var parser: Parser = .{ .source = source };
+    var parser = try Parser.init(testing.allocator, source);
     defer parser.deinit(testing.allocator);
     try parser.parse(testing.allocator);
 
@@ -111,7 +111,7 @@ test "leaf in quotes" {
         \\key3: "double quoted"
     ;
 
-    var parser: Parser = .{ .source = source };
+    var parser = try Parser.init(testing.allocator, source);
     defer parser.deinit(testing.allocator);
     try parser.parse(testing.allocator);
 
@@ -154,7 +154,7 @@ test "nested maps" {
         \\key2   : value2
     ;
 
-    var parser: Parser = .{ .source = source };
+    var parser = try Parser.init(testing.allocator, source);
     defer parser.deinit(testing.allocator);
     try parser.parse(testing.allocator);
 
@@ -215,7 +215,7 @@ test "map of list of values" {
         \\  - 2
     ;
 
-    var parser: Parser = .{ .source = source };
+    var parser = try Parser.init(testing.allocator, source);
     defer parser.deinit(testing.allocator);
     try parser.parse(testing.allocator);
 
@@ -272,7 +272,7 @@ test "map of list of maps" {
         \\- key4 : value4
     ;
 
-    var parser: Parser = .{ .source = source };
+    var parser = try Parser.init(testing.allocator, source);
     defer parser.deinit(testing.allocator);
     try parser.parse(testing.allocator);
 
@@ -332,7 +332,7 @@ test "map of list of maps with inner list" {
         \\       - name: inner-bar
     ;
 
-    var parser: Parser = .{ .source = source };
+    var parser = try Parser.init(testing.allocator, source);
     defer parser.deinit(testing.allocator);
     try parser.parse(testing.allocator);
 
@@ -432,7 +432,7 @@ test "list of lists" {
         \\- [Sammy Sosa   , 63, 0.288]
     ;
 
-    var parser: Parser = .{ .source = source };
+    var parser = try Parser.init(testing.allocator, source);
     defer parser.deinit(testing.allocator);
     try parser.parse(testing.allocator);
 
@@ -518,7 +518,7 @@ test "inline list" {
         \\[name        , hr, avg  ]
     ;
 
-    var parser: Parser = .{ .source = source };
+    var parser = try Parser.init(testing.allocator, source);
     defer parser.deinit(testing.allocator);
     try parser.parse(testing.allocator);
 
@@ -558,7 +558,7 @@ test "inline list as mapping value" {
         \\        hr, avg  ]
     ;
 
-    var parser: Parser = .{ .source = source };
+    var parser = try Parser.init(testing.allocator, source);
     defer parser.deinit(testing.allocator);
     try parser.parse(testing.allocator);
 
@@ -606,15 +606,35 @@ test "inline list as mapping value" {
 }
 
 fn parseSuccess(comptime source: []const u8) !void {
-    var parser: Parser = .{ .source = source };
+    var parser = try Parser.init(testing.allocator, source);
     defer parser.deinit(testing.allocator);
     try parser.parse(testing.allocator);
 }
 
 fn parseError(comptime source: []const u8, err: Parser.ParseError) !void {
-    var parser: Parser = .{ .source = source };
+    var parser = try Parser.init(testing.allocator, source);
     defer parser.deinit(testing.allocator);
     try testing.expectError(err, parser.parse(testing.allocator));
+}
+
+fn parseError2(source: []const u8, comptime format: []const u8, args: anytype) !void {
+    var parser = try Parser.init(testing.allocator, source);
+    defer parser.deinit(testing.allocator);
+
+    const res = parser.parse(testing.allocator);
+    try testing.expectError(error.ParseFailure, res);
+
+    var bundle = try parser.errors.toOwnedBundle("");
+    defer bundle.deinit(testing.allocator);
+    try testing.expect(bundle.errorMessageCount() > 0);
+
+    var given: std.ArrayListUnmanaged(u8) = .empty;
+    defer given.deinit(testing.allocator);
+    try bundle.renderToWriter(.{ .ttyconf = .no_color }, given.writer(testing.allocator));
+
+    const expected = try std.fmt.allocPrint(testing.allocator, format, args);
+    defer testing.allocator.free(expected);
+    try testing.expectEqualStrings(expected, given.items);
 }
 
 test "empty doc with spaces and comments" {
@@ -627,10 +647,15 @@ test "empty doc with spaces and comments" {
 }
 
 test "comment between --- and ! in document start" {
-    try parseError(
+    try parseError2(
         \\--- # what is it?
         \\!
-    , error.UnexpectedToken);
+    ,
+        \\(memory):2:1: error: expected end of document
+        \\!
+        \\^
+        \\
+    , .{});
 }
 
 test "correct doc start with tag" {
@@ -641,12 +666,17 @@ test "correct doc start with tag" {
 }
 
 test "doc close without explicit doc open" {
-    try parseError(
+    try parseError2(
         \\
         \\
         \\# something cool
         \\...
-    , error.UnexpectedToken);
+    ,
+        \\(memory):4:1: error: missing explicit document open marker '---'
+        \\...
+        \\^~~
+        \\
+    , .{});
 }
 
 test "doc open and close are ok" {
@@ -681,11 +711,16 @@ test "explicit doc with a single string is ok" {
 }
 
 test "doc with two string is bad" {
-    try parseError(
+    try parseError2(
         \\first
         \\second
         \\# this should fail already
-    , error.UnexpectedToken);
+    ,
+        \\(memory):2:1: error: expected end of document
+        \\second
+        \\^~~~~~
+        \\
+    , .{});
 }
 
 test "single quote string can have new lines" {
@@ -738,17 +773,27 @@ test "map of maps" {
 }
 
 test "map value indicator needs to be on the same line" {
-    try parseError(
+    try parseError2(
         \\a
         \\  : b
-    , error.UnexpectedToken);
+    ,
+        \\(memory):2:3: error: expected end of document
+        \\  : b
+        \\  ^~~
+        \\
+    , .{});
 }
 
 test "value needs to be indented" {
-    try parseError(
+    try parseError2(
         \\a:
         \\b
-    , error.MalformedYaml);
+    ,
+        \\(memory):2:1: error: 'value' in map should have more indentation than the 'key'
+        \\b
+        \\^
+        \\
+    , .{});
 }
 
 test "comment between a key and a value is fine" {
@@ -771,10 +816,15 @@ test "simple list" {
 }
 
 test "list indentation matters" {
-    try parseError(
+    try parseError2(
         \\  - a
         \\- b
-    , error.UnexpectedToken);
+    ,
+        \\(memory):2:1: error: expected end of document
+        \\- b
+        \\^~~
+        \\
+    , .{});
 
     try parseSuccess(
         \\- a
@@ -839,4 +889,28 @@ test "mixed ints with floats in a list" {
     try parseSuccess(
         \\[0, 1.0]
     );
+}
+
+test "expect end of document" {
+    try parseError2(
+        \\  key1: value1
+        \\key2: value2
+    ,
+        \\(memory):2:1: error: expected end of document
+        \\key2: value2
+        \\^~~~~~~~~~~~
+        \\
+    , .{});
+}
+
+test "expect map separator" {
+    try parseError2(
+        \\key1: value1
+        \\key2
+    ,
+        \\(memory):2:5: error: expected map separator ':'
+        \\key2
+        \\~~~~^
+        \\
+    , .{});
 }

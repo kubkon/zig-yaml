@@ -4,6 +4,8 @@ const log = std.log.scoped(.parser);
 const mem = std.mem;
 
 const Allocator = mem.Allocator;
+const ErrorBundle = std.zig.ErrorBundle;
+const LineCol = Tree.LineCol;
 const List = Tree.List;
 const Map = Tree.Map;
 const Node = Tree.Node;
@@ -14,6 +16,7 @@ const TokenWithLineCol = Tree.TokenWithLineCol;
 const Tree = @import("Tree.zig");
 const String = Tree.String;
 const Parser = @This();
+const Yaml = @import("Yaml.zig");
 
 source: []const u8,
 tokens: std.MultiArrayList(TokenWithLineCol) = .empty,
@@ -22,6 +25,13 @@ docs: std.ArrayListUnmanaged(Node.Index) = .empty,
 nodes: std.MultiArrayList(Node) = .empty,
 extra: std.ArrayListUnmanaged(u32) = .empty,
 string_bytes: std.ArrayListUnmanaged(u8) = .empty,
+errors: ErrorBundle.Wip,
+
+pub fn init(gpa: Allocator, source: []const u8) Allocator.Error!Parser {
+    var self: Parser = .{ .source = source, .errors = undefined };
+    try self.errors.init(gpa);
+    return self;
+}
 
 pub fn deinit(self: *Parser, gpa: Allocator) void {
     self.tokens.deinit(gpa);
@@ -29,13 +39,14 @@ pub fn deinit(self: *Parser, gpa: Allocator) void {
     self.nodes.deinit(gpa);
     self.extra.deinit(gpa);
     self.string_bytes.deinit(gpa);
+    self.errors.deinit();
     self.* = undefined;
 }
 
 pub fn parse(self: *Parser, gpa: Allocator) ParseError!void {
     var tokenizer = Tokenizer{ .buffer = self.source };
-    var line: usize = 0;
-    var prev_line_last_col: usize = 0;
+    var line: u32 = 0;
+    var prev_line_last_col: u32 = 0;
 
     while (true) {
         const tok = tokenizer.next();
@@ -45,7 +56,7 @@ pub fn parse(self: *Parser, gpa: Allocator) ParseError!void {
             .token = tok,
             .line_col = .{
                 .line = line,
-                .col = tok.loc.start - prev_line_last_col,
+                .col = @intCast(tok.loc.start - prev_line_last_col),
             },
         });
 
@@ -53,7 +64,7 @@ pub fn parse(self: *Parser, gpa: Allocator) ParseError!void {
             .eof => break,
             .new_line => {
                 line += 1;
-                prev_line_last_col = tok.loc.end;
+                prev_line_last_col = @intCast(tok.loc.end);
             },
             else => {},
         }
@@ -197,7 +208,10 @@ fn doc(self: *Parser, gpa: Allocator) ParseError!Node.Index {
     // Parse footer
     const node_end: Token.Index = footer: {
         if (self.eatToken(.doc_end, &.{})) |pos| {
-            if (!is_explicit) return error.UnexpectedToken;
+            if (!is_explicit) {
+                self.token_it.seekBy(-1);
+                return self.fail(gpa, self.token_it.pos, "missing explicit document open marker '---'", .{});
+            }
             if (self.getCol(pos) > 0) return error.MalformedYaml;
             break :footer pos;
         }
@@ -210,7 +224,8 @@ fn doc(self: *Parser, gpa: Allocator) ParseError!Node.Index {
         if (self.eatToken(.eof, &.{})) |pos| {
             break :footer @enumFromInt(@intFromEnum(pos) - 1);
         }
-        return error.UnexpectedToken;
+
+        return self.fail(gpa, self.token_it.pos, "expected end of document", .{});
     };
 
     log.debug("(doc) end {s}@{d}", .{ @tagName(self.token(node_end).id), node_end });
@@ -262,17 +277,14 @@ fn map(self: *Parser, gpa: Allocator) ParseError!Node.OptionalIndex {
             .flow_map_end => {
                 break;
             },
-            else => {
-                log.err("Unhandled token in map: {}", .{key});
-                // TODO key not being a literal
-                return error.Unhandled;
-            },
+            else => return self.fail(gpa, self.token_it.pos, "unexpected token for 'key': {}", .{key}),
         }
 
         log.debug("(map) key {s}@{d}", .{ self.rawString(key_pos, key_pos), key_pos });
 
         // Separator
-        _ = try self.expectToken(.map_value_ind, &.{ .new_line, .comment });
+        _ = self.expectToken(.map_value_ind, &.{ .new_line, .comment }) catch
+            return self.fail(gpa, self.token_it.pos, "expected map separator ':'", .{});
 
         // Parse value
         const value_index = try self.value(gpa);
@@ -284,7 +296,7 @@ fn map(self: *Parser, gpa: Allocator) ParseError!Node.OptionalIndex {
             }
             if (self.nodes.items(.tag)[@intFromEnum(v)] == .value) {
                 if (self.getCol(value_start) == self.getCol(key_pos)) {
-                    return error.MalformedYaml;
+                    return self.fail(gpa, value_start, "'value' in map should have more indentation than the 'key'", .{});
                 }
             }
         }
@@ -707,13 +719,70 @@ fn token(self: Parser, index: Token.Index) Token {
     return self.tokens.items(.token)[@intFromEnum(index)];
 }
 
+fn fail(self: *Parser, gpa: Allocator, token_index: Token.Index, comptime format: []const u8, args: anytype) ParseError {
+    const line_col = self.tokens.items(.line_col)[@intFromEnum(token_index)];
+    const msg = try std.fmt.allocPrint(gpa, format, args);
+    defer gpa.free(msg);
+    const line_info = getLineInfo(self.source, line_col);
+    try self.errors.addRootErrorMessage(.{
+        .msg = try self.errors.addString(msg),
+        .src_loc = try self.errors.addSourceLocation(.{
+            .src_path = try self.errors.addString("(memory)"),
+            .line = line_col.line,
+            .column = line_col.col,
+            .span_start = line_info.span_start,
+            .span_main = line_info.span_main,
+            .span_end = line_info.span_end,
+            .source_line = try self.errors.addString(line_info.line),
+        }),
+        .notes_len = 0,
+    });
+    return error.ParseFailure;
+}
+
+fn getLineInfo(source: []const u8, line_col: LineCol) struct {
+    line: []const u8,
+    span_start: u32,
+    span_main: u32,
+    span_end: u32,
+} {
+    const line = line: {
+        var it = mem.splitScalar(u8, source, '\n');
+        var line_count: usize = 0;
+        const line = while (it.next()) |line| {
+            defer line_count += 1;
+            if (line_count == line_col.line) break line;
+        } else return .{
+            .line = &.{},
+            .span_start = 0,
+            .span_main = 0,
+            .span_end = 0,
+        };
+        break :line line;
+    };
+
+    const span_start: u32 = span_start: {
+        const trimmed = mem.trimLeft(u8, line, " ");
+        break :span_start @intCast(mem.indexOf(u8, line, trimmed).?);
+    };
+
+    const span_end: u32 = @intCast(mem.trimRight(u8, line, " \r\n").len);
+
+    return .{
+        .line = line,
+        .span_start = span_start,
+        .span_main = line_col.col,
+        .span_end = span_end,
+    };
+}
+
 pub const ParseError = error{
     InvalidEscapeSequence,
     MalformedYaml,
     NestedDocuments,
     UnexpectedEof,
     UnexpectedToken,
-    Unhandled,
+    ParseFailure,
 } || Allocator.Error;
 
 test {

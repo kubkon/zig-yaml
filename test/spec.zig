@@ -30,7 +30,10 @@ const preamble =
     \\    const source = try file.readToEndAlloc(alloc, std.math.maxInt(u32));
     \\    defer alloc.free(source);
     \\
-    \\    return Yaml.load(alloc, source);
+    \\    var yaml: Yaml = .{ .source = source };
+    \\    errdefer yaml.deinit(alloc);
+    \\    try yaml.load(alloc);
+    \\    return yaml;
     \\}
     \\
     \\fn loadFileString(file_path: []const u8) ![]u8 {
