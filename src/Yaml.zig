@@ -104,7 +104,8 @@ fn parseValue(self: Yaml, arena: Allocator, comptime T: type, value: Value) Erro
         .pointer => if (value.asList()) |list| {
             return self.parsePointer(arena, T, .{ .list = list });
         } else |_| {
-            return self.parsePointer(arena, T, .{ .string = try value.asString() });
+            const string = try value.asString();
+            return self.parsePointer(arena, T, .{ .string = try arena.dupe(u8, string) });
         },
         .void => error.TypeMismatch,
         .optional => unreachable,
@@ -172,7 +173,7 @@ fn parsePointer(self: Yaml, arena: Allocator, comptime T: type, value: Value) Er
     switch (ptr_info.size) {
         .slice => {
             if (ptr_info.child == u8) {
-                return value.asString();
+                return try arena.dupe(u8, try value.asString());
             }
 
             var parsed = try arena.alloc(ptr_info.child, value.list.len);
