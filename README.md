@@ -19,9 +19,9 @@ The library can be installed using the Zig tools. First, you need to fetch the r
 zig fetch --save https://github.com/kubkon/zig-yaml/archive/refs/tags/[RELEASE_VERSION].tar.gz
 ```
 
-It's more convenient to save the library with a desired name, for example, like this:
+It's more convenient to save the library with a desired name, for example, like this (assuming you are targeting latest release of Zig):
 ```
-zig fetch --save=yaml https://github.com/kubkon/zig-yaml/archive/refs/tags/0.0.1.tar.gz
+zig fetch --save=yaml https://github.com/kubkon/zig-yaml/archive/refs/tags/0.1.1.tar.gz
 ```
 
 And then add those lines to your project's `build.zig` file:
@@ -36,6 +36,7 @@ exe.root_module.addImport("yaml", yaml.module("yaml"));
 
 After that, you can simply import the zig-yaml library in your project's code by using `const yaml = @import("yaml");`.
 
+For zig-0.14, please use any release after `0.1.0`. For pre-zig-0.14 (e.g., zig-0.13), use `0.0.1`.
 
 ## Basic usage
 
