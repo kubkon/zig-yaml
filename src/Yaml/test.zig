@@ -357,6 +357,24 @@ test "double quoted string" {
     , arr[3]);
 }
 
+test "commas in string" {
+    const source =
+        \\a: 900,50,50
+    ;
+
+    var yaml: Yaml = .{ .source = source };
+    defer yaml.deinit(testing.allocator);
+    try yaml.load(testing.allocator);
+
+    var arena = Arena.init(testing.allocator);
+    defer arena.deinit();
+
+    const simple = try yaml.parse(arena.allocator(), struct {
+        a: []const u8,
+    });
+    try testing.expectEqualStrings("900,50,50", simple.a);
+}
+
 test "multidoc typed as a slice of structs" {
     const source =
         \\---
