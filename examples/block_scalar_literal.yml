@@ -1,6 +1,4 @@
 # preserve \n in the multiline string
 key: |
- ### Heading
-
- * Bullet
- * Points
+  \//||\/||
+  // ||  ||__
