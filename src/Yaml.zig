@@ -508,12 +508,12 @@ pub const Value = union(enum) {
 
                 return Value{ .list = try out_list.toOwnedSlice(gpa) };
             },
-            .value, .string_value => {
-                const raw = switch (tag) {
-                    .value => tree.nodeScope(node_index).rawString(tree),
-                    .string_value => tree.nodeData(node_index).string.slice(tree),
-                    else => unreachable,
-                };
+            .string_value => {
+                const raw = tree.nodeData(node_index).string.slice(tree);
+                return Value{ .string = try gpa.dupe(u8, raw) };
+            },
+            .value => {
+                const raw = tree.nodeScope(node_index).rawString(tree);
 
                 try_int: {
                     const int = std.fmt.parseInt(i64, raw, 0) catch break :try_int;
