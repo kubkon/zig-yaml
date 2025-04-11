@@ -666,17 +666,12 @@ test "correct doc start with tag" {
 }
 
 test "doc close without explicit doc open" {
-    try parseError2(
+    try parseSuccess(
         \\
         \\
         \\# something cool
         \\...
-    ,
-        \\(memory):4:1: error: missing explicit document open marker '---'
-        \\...
-        \\^~~
-        \\
-    , .{});
+    );
 }
 
 test "doc open and close are ok" {
