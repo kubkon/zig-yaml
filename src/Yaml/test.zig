@@ -357,6 +357,21 @@ test "double quoted string" {
     , arr[3]);
 }
 
+test "hex string" {
+    const yml_str =
+        \\hex_str: "0xdeadbeef"
+    ;
+
+    var value = Yaml{ .source = yml_str };
+    try value.load(std.testing.allocator);
+    defer value.deinit(std.testing.allocator);
+
+    try std.testing.expectEqualDeep(
+        Yaml.Value{ .string = "0xdeadbeef" },
+        value.docs.items[0].map.get("hex_str").?,
+    );
+}
+
 test "multidoc typed as a slice of structs" {
     const source =
         \\---
