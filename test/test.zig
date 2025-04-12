@@ -89,8 +89,8 @@ const LibTbd = struct {
     },
     install_name: []const u8,
     current_version: union(enum) {
-        string: []const u8,
         int: usize,
+        string: []const u8,
     },
     reexported_libraries: ?[]const struct {
         targets: []const []const u8,
