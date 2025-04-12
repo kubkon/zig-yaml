@@ -857,6 +857,18 @@ test "weirdly nested map of maps of lists" {
     );
 }
 
+test "curly brackets denote a flow map" {
+    try parseSuccess(
+        \\{ a: b, c: d }
+    );
+}
+
+test "empty flow map" {
+    try parseSuccess(
+        \\{ }
+    );
+}
+
 test "square brackets denote a list" {
     try parseSuccess(
         \\[ a,
