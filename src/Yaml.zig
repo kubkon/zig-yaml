@@ -155,8 +155,11 @@ fn parseStruct(self: Yaml, arena: Allocator, comptime T: type, map: Map) Error!T
         if (@typeInfo(field.type) == .optional) {
             const default_value: ?field.type = field.defaultValue();
             if (value == null) {
-                const new_val = try Value.encode(arena, default_value);
-                value = self.parseValue(arena, field.type, new_val) orelse null;
+                if (Value.encode(arena, default_value)) |encoded_value| {
+                    value = encoded_value;
+                } else |err| {
+                    log.debug("default value encoding error {} for: {s} falling back to null", .{ err, field.name });
+                }
             }
             @field(parsed, field.name) = try self.parseOptional(arena, field.type, value);
             continue;
