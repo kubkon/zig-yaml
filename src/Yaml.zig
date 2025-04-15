@@ -605,7 +605,7 @@ pub const Value = union(enum) {
                         return encode(arena, @as(Slice, input));
                     },
                     else => {
-                        @compileError("Unhandled type: {s}" ++ @typeName(info.child));
+                        @compileError("Unhandled type: " ++ @typeName(info.child));
                     },
                 },
                 .slice => {
@@ -628,7 +628,7 @@ pub const Value = union(enum) {
                     return Value{ .list = try list.toOwnedSlice(arena) };
                 },
                 else => {
-                    @compileError("Unhandled type: {s}" ++ @typeName(@TypeOf(input)));
+                    @compileError("Unhandled type: " ++ @typeName(@TypeOf(input)));
                 },
             },
 
@@ -639,7 +639,7 @@ pub const Value = union(enum) {
             .null => return null,
 
             else => {
-                @compileError("Unhandled type: {s}" ++ @typeName(@TypeOf(input)));
+                @compileError("Unhandled type: " ++ @typeName(@TypeOf(input)));
             },
         }
     }
