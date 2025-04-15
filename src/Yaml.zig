@@ -637,6 +637,7 @@ pub const Value = union(enum) {
             .optional => return if (input) |val| encode(arena, val) else null,
 
             .null => return null,
+            .bool => return Value{ .boolean = input },
 
             else => {
                 @compileError("Unhandled type: " ++ @typeName(@TypeOf(input)));
