@@ -147,12 +147,16 @@ fn parseStruct(self: Yaml, arena: Allocator, comptime T: type, map: Map) Error!T
     var parsed: T = undefined;
 
     inline for (struct_info.fields) |field| {
-        const value: ?Value = map.get(field.name) orelse blk: {
+        var value: ?Value = map.get(field.name) orelse blk: {
             const field_name = try mem.replaceOwned(u8, arena, field.name, "_", "-");
             break :blk map.get(field_name);
         };
 
         if (@typeInfo(field.type) == .optional) {
+            const default_value: ?field.type = field.defaultValue();
+            if (value == null) {
+                value = default_value orelse null;
+            }
             @field(parsed, field.name) = try self.parseOptional(arena, field.type, value);
             continue;
         }
