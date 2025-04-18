@@ -113,6 +113,51 @@ test "several integer bases" {
     try testing.expectEqualSlices(i8, &[_]i8{ 10, -10, 16, -16, 8, -8 }, &arr);
 }
 
+const TestEnum = enum {
+    alpha,
+    bravo,
+    charlie,
+};
+
+test "enums" {
+    const source =
+        \\- alpha
+        \\- bravo
+        \\- charlie
+    ;
+
+    var yaml: Yaml = .{ .source = source };
+    defer yaml.deinit(testing.allocator);
+    try yaml.load(testing.allocator);
+
+    try testing.expectEqual(yaml.docs.items.len, 1);
+
+    var arena = Arena.init(testing.allocator);
+    defer arena.deinit();
+
+    const arr = try yaml.parse(arena.allocator(), [3]TestEnum);
+    try testing.expectEqualSlices(TestEnum, &[_]TestEnum{ .alpha, .bravo, .charlie }, &arr);
+}
+
+test "invalid enum" {
+    const source =
+        \\- delta
+        \\- echo
+    ;
+
+    var yaml: Yaml = .{ .source = source };
+    defer yaml.deinit(testing.allocator);
+    try yaml.load(testing.allocator);
+
+    try testing.expectEqual(yaml.docs.items.len, 1);
+
+    var arena = Arena.init(testing.allocator);
+    defer arena.deinit();
+
+    const result = yaml.parse(arena.allocator(), [2]TestEnum);
+    try testing.expectError(Yaml.Error.EnumTagMissing, result);
+}
+
 test "simple map untyped" {
     const source =
         \\a: 0
@@ -640,4 +685,10 @@ test "stringify a list" {
 
     const arr: [3]i64 = .{ 1, 2, 3 };
     try testStringify("[ 1, 2, 3 ]", arr);
+}
+
+test "stringify an enum" {
+    try testStringify("alpha", TestEnum.alpha);
+    try testStringify("bravo", TestEnum.bravo);
+    try testStringify("charlie", TestEnum.charlie);
 }
