@@ -155,6 +155,18 @@ test "simple flow sequence / bracket list with trailing comma" {
     try testing.expectEqualStrings("c", list[2].string);
 }
 
+test "simple flow sequence / bracket list with invalid comment" {
+    const source =
+        \\a_key: [a, b, c]#invalid
+    ;
+
+    var yaml: Yaml = .{ .source = source };
+    defer yaml.deinit(testing.allocator);
+    const err = yaml.load(testing.allocator);
+
+    try std.testing.expectError(error.MalformedYaml, err);
+}
+
 test "simple map untyped" {
     const source =
         \\a: 0

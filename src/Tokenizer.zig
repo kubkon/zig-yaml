@@ -169,6 +169,7 @@ pub fn next(self: *Tokenizer) Token {
                     break;
                 },
                 '#' => {
+                    result.id = .comment;
                     state = .comment;
                 },
                 '*' => {

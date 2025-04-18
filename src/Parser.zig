@@ -422,6 +422,11 @@ fn listBracketed(self: *Parser, gpa: Allocator) ParseError!Node.OptionalIndex {
         try values.append(gpa, .{ .node = value_index.unwrap().? });
     };
 
+    if (self.eatToken(.comment, &.{.comment})) |_| {
+        // There must be a space after the closing bracket before a comment
+        return error.MalformedYaml;
+    }
+
     log.debug("(list) end {s}@{d}", .{ @tagName(self.token(node_end).id), node_end });
 
     try self.encodeList(gpa, node_index, values.items, .{
