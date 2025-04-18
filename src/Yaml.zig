@@ -541,6 +541,10 @@ pub const Value = union(enum) {
             .float,
             => return Value{ .scalar = try std.fmt.allocPrint(arena, "{d}", .{input}) },
 
+            // TODO - Support per-field option to use yes/no or on/off instead of true/false
+            .bool,
+            => return Value{ .scalar = try std.fmt.allocPrint(arena, "{}", .{input}) },
+
             .@"struct" => |info| if (info.is_tuple) {
                 var list: std.ArrayListUnmanaged(Value) = .empty;
                 try list.ensureTotalCapacityPrecise(arena, info.fields.len);
@@ -617,7 +621,6 @@ pub const Value = union(enum) {
             .optional => return if (input) |val| encode(arena, val) else null,
 
             .null => return null,
-            .bool => return Value{ .boolean = input },
 
             else => {
                 @compileError("Unhandled type: " ++ @typeName(@TypeOf(input)));

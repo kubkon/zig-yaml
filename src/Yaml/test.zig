@@ -179,6 +179,31 @@ test "simple flow sequence / bracket list with double trailing commas" {
     try std.testing.expectError(error.ParseFailure, err);
 }
 
+test "bools" {
+    const source =
+        \\- false
+        \\- true
+        \\- off
+        \\- on
+        \\- no
+        \\- yes
+        \\- n
+        \\- y
+    ;
+
+    var yaml: Yaml = .{ .source = source };
+    defer yaml.deinit(testing.allocator);
+    try yaml.load(testing.allocator);
+
+    try testing.expectEqual(yaml.docs.items.len, 1);
+
+    var arena = Arena.init(testing.allocator);
+    defer arena.deinit();
+
+    const arr = try yaml.parse(arena.allocator(), [8]bool);
+    try testing.expectEqualSlices(bool, &[_]bool{ false, true, false, true, false, true, false, true, }, &arr);
+}
+
 const TestEnum = enum {
     alpha,
     bravo,
@@ -826,6 +851,11 @@ test "struct default value test" {
         try testing.expectEqual(tc.container.c, parsed.c);
         try testing.expectEqual(tc.container.d, parsed.d);
     }
+}
+
+test "stringify a bool" {
+    try testStringify("false", false);
+    try testStringify("true", true);
 }
 
 test "stringify an enum" {
