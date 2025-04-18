@@ -22,9 +22,9 @@ test "simple list" {
     const list = yaml.docs.items[0].list;
     try testing.expectEqual(list.len, 3);
 
-    try testing.expectEqualStrings("a", list[0].string);
-    try testing.expectEqualStrings("b", list[1].string);
-    try testing.expectEqualStrings("c", list[2].string);
+    try testing.expectEqualStrings("a", list[0].scalar);
+    try testing.expectEqualStrings("b", list[1].scalar);
+    try testing.expectEqualStrings("c", list[2].scalar);
 }
 
 test "simple list typed as array of strings" {
@@ -126,7 +126,7 @@ test "simple map untyped" {
 
     const map = yaml.docs.items[0].map;
     try testing.expect(map.contains("a"));
-    try testing.expectEqual(@as(i64, 0), map.get("a").?.int);
+    try testing.expectEqualStrings("0", map.get("a").?.scalar);
 }
 
 test "simple map untyped with a list of maps" {
@@ -150,12 +150,12 @@ test "simple map untyped with a list of maps" {
     try testing.expect(map.contains("a"));
     try testing.expect(map.contains("b"));
     try testing.expect(map.contains("c"));
-    try testing.expectEqual(@as(i64, 0), map.get("a").?.int);
-    try testing.expectEqual(@as(i64, 1), map.get("c").?.int);
-    try testing.expectEqual(@as(i64, 1), map.get("b").?.list[0].map.get("foo").?.int);
-    try testing.expectEqual(@as(i64, 2), map.get("b").?.list[0].map.get("bar").?.int);
-    try testing.expectEqual(@as(i64, 3), map.get("b").?.list[1].map.get("foo").?.int);
-    try testing.expectEqual(@as(i64, 4), map.get("b").?.list[1].map.get("bar").?.int);
+    try testing.expectEqualStrings("0", map.get("a").?.scalar);
+    try testing.expectEqualStrings("1", map.get("c").?.scalar);
+    try testing.expectEqualStrings("1", map.get("b").?.list[0].map.get("foo").?.scalar);
+    try testing.expectEqualStrings("2", map.get("b").?.list[0].map.get("bar").?.scalar);
+    try testing.expectEqualStrings("3", map.get("b").?.list[1].map.get("foo").?.scalar);
+    try testing.expectEqualStrings("4", map.get("b").?.list[1].map.get("bar").?.scalar);
 }
 
 test "simple map untyped with a list of maps. no indent" {
@@ -174,8 +174,8 @@ test "simple map untyped with a list of maps. no indent" {
     const map = yaml.docs.items[0].map;
     try testing.expect(map.contains("b"));
     try testing.expect(map.contains("c"));
-    try testing.expectEqual(@as(i64, 1), map.get("c").?.int);
-    try testing.expectEqual(@as(i64, 1), map.get("b").?.list[0].map.get("foo").?.int);
+    try testing.expectEqualStrings("1", map.get("c").?.scalar);
+    try testing.expectEqualStrings("1", map.get("b").?.list[0].map.get("foo").?.scalar);
 }
 
 test "simple map untyped with a list of maps. no indent 2" {
@@ -199,12 +199,12 @@ test "simple map untyped with a list of maps. no indent 2" {
     try testing.expect(map.contains("a"));
     try testing.expect(map.contains("b"));
     try testing.expect(map.contains("c"));
-    try testing.expectEqual(@as(i64, 0), map.get("a").?.int);
-    try testing.expectEqual(@as(i64, 1), map.get("c").?.int);
-    try testing.expectEqual(@as(i64, 1), map.get("b").?.list[0].map.get("foo").?.int);
-    try testing.expectEqual(@as(i64, 2), map.get("b").?.list[0].map.get("bar").?.int);
-    try testing.expectEqual(@as(i64, 3), map.get("b").?.list[1].map.get("foo").?.int);
-    try testing.expectEqual(@as(i64, 4), map.get("b").?.list[1].map.get("bar").?.int);
+    try testing.expectEqualStrings("0", map.get("a").?.scalar);
+    try testing.expectEqualStrings("1", map.get("c").?.scalar);
+    try testing.expectEqualStrings("1", map.get("b").?.list[0].map.get("foo").?.scalar);
+    try testing.expectEqualStrings("2", map.get("b").?.list[0].map.get("bar").?.scalar);
+    try testing.expectEqualStrings("3", map.get("b").?.list[1].map.get("foo").?.scalar);
+    try testing.expectEqualStrings("4", map.get("b").?.list[1].map.get("bar").?.scalar);
 }
 
 test "simple map typed" {
@@ -562,7 +562,7 @@ test "demoting floats to ints in a list is an error" {
     var arena = Arena.init(testing.allocator);
     defer arena.deinit();
 
-    try testing.expectError(error.TypeMismatch, yaml.parse(arena.allocator(), struct {
+    try testing.expectError(error.InvalidCharacter, yaml.parse(arena.allocator(), struct {
         a_list: []const u64,
     }));
 }
