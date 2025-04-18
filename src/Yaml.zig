@@ -96,6 +96,7 @@ fn parseValue(self: Yaml, arena: Allocator, comptime T: type, value: Value) Erro
         .float => self.parseFloat(T, value),
         .@"struct" => self.parseStruct(arena, T, try value.asMap()),
         .@"union" => self.parseUnion(arena, T, value),
+        .@"enum" => std.meta.stringToEnum(T, try value.asScalar()) orelse Error.EnumTagMissing,
         .array => self.parseArray(arena, T, try value.asList()),
         .pointer => if (value.asList()) |list| {
             return self.parsePointer(arena, T, .{ .list = list });
@@ -262,6 +263,7 @@ pub const Error = error{
     Unimplemented,
     TypeMismatch,
     StructFieldMissing,
+    EnumTagMissing,
     ArraySizeMismatch,
     UntaggedUnion,
     UnionTagMissing,
@@ -571,6 +573,8 @@ pub const Value = union(enum) {
                     }
                 } else unreachable;
             } else return error.UntaggedUnion,
+
+            .@"enum" => return try encode(arena, @tagName(input)),
 
             .array => return encode(arena, &input),
 
