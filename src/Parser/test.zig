@@ -882,7 +882,7 @@ test "comment within a bracketed list is an error" {
     try parseError(
         \\[ # something
         \\]
-    , error.MalformedYaml);
+    , error.ParseFailure);
 }
 
 test "mixed ints with floats in a list" {

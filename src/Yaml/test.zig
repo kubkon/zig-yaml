@@ -164,7 +164,19 @@ test "simple flow sequence / bracket list with invalid comment" {
     defer yaml.deinit(testing.allocator);
     const err = yaml.load(testing.allocator);
 
-    try std.testing.expectError(error.MalformedYaml, err);
+    try std.testing.expectError(error.ParseFailure, err);
+}
+
+test "simple flow sequence / bracket list with double trailing commas" {
+    const source =
+        \\a_key: [a, b, c,,]
+    ;
+
+    var yaml: Yaml = .{ .source = source };
+    defer yaml.deinit(testing.allocator);
+    const err = yaml.load(testing.allocator);
+
+    try std.testing.expectError(error.ParseFailure, err);
 }
 
 test "simple map untyped" {

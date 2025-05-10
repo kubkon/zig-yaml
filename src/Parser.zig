@@ -417,14 +417,15 @@ fn listBracketed(self: *Parser, gpa: Allocator) ParseError!Node.OptionalIndex {
             break pos;
 
         const value_index = try self.value(gpa);
-        if (value_index == .none) return error.MalformedYaml;
+        if (value_index == .none) {
+            return self.fail(gpa, self.token_it.pos, "expecting a value in flow sequence", .{});
+        }
 
         try values.append(gpa, .{ .node = value_index.unwrap().? });
     };
 
     if (self.eatToken(.comment, &.{.comment})) |_| {
-        // There must be a space after the closing bracket before a comment
-        return error.MalformedYaml;
+        return self.fail(gpa, self.token_it.pos, "comments must be separated from other tokens by white space characters", .{});
     }
 
     log.debug("(list) end {s}@{d}", .{ @tagName(self.token(node_end).id), node_end });
