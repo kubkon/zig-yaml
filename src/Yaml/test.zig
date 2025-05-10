@@ -129,9 +129,9 @@ test "simple flow sequence / bracket list" {
     const list = map.get("a_key").?.list;
     try testing.expectEqual(list.len, 3);
 
-    try testing.expectEqualStrings("a", list[0].string);
-    try testing.expectEqualStrings("b", list[1].string);
-    try testing.expectEqualStrings("c", list[2].string);
+    try testing.expectEqualStrings("a", list[0].scalar);
+    try testing.expectEqualStrings("b", list[1].scalar);
+    try testing.expectEqualStrings("c", list[2].scalar);
 }
 
 test "simple flow sequence / bracket list with trailing comma" {
@@ -150,9 +150,9 @@ test "simple flow sequence / bracket list with trailing comma" {
     const list = map.get("a_key").?.list;
     try testing.expectEqual(list.len, 3);
 
-    try testing.expectEqualStrings("a", list[0].string);
-    try testing.expectEqualStrings("b", list[1].string);
-    try testing.expectEqualStrings("c", list[2].string);
+    try testing.expectEqualStrings("a", list[0].scalar);
+    try testing.expectEqualStrings("b", list[1].scalar);
+    try testing.expectEqualStrings("c", list[2].scalar);
 }
 
 test "simple flow sequence / bracket list with invalid comment" {
