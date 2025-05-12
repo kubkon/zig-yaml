@@ -183,7 +183,7 @@ fn parseStruct(self: Yaml, arena: Allocator, comptime T: type, map: Map) Error!T
         if (@typeInfo(field.type) == .optional) {
             if (value == null) blk: {
                 const maybe_default_value = field.defaultValue() orelse break :blk;
-                value = Value.encode(arena, maybe_default_value) orelse break :blk;
+                value = Value.encode(arena, maybe_default_value) catch break :blk;
             }
             @field(parsed, field.name) = try self.parseOptional(arena, field.type, value);
             continue;
