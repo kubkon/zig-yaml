@@ -707,3 +707,78 @@ test "stringify a list" {
     const arr: [3]i64 = .{ 1, 2, 3 };
     try testStringify("[ 1, 2, 3 ]", arr);
 }
+
+test "struct default value test" {
+    const TestStruct = struct {
+        a: i32,
+        b: ?[]const u8 = "test",
+        c: ?u8 = 5,
+        d: u8,
+    };
+
+    const TestCase = struct {
+        yaml: []const u8,
+        container: TestStruct,
+    };
+
+    const tcs = [_]TestCase{
+        .{
+            .yaml =
+            \\---
+            \\a: 1
+            \\b: "asd"
+            \\c: 3
+            \\d: 1
+            \\...
+            ,
+            .container = .{
+                .a = 1,
+                .b = "asd",
+                .c = 3,
+                .d = 1,
+            },
+        },
+        .{
+            .yaml =
+            \\---
+            \\a: 1
+            \\c: 3
+            \\d: 1
+            \\...
+            ,
+            .container = .{
+                .a = 1,
+                .b = "test",
+                .c = 3,
+                .d = 1,
+            },
+        },
+        .{
+            .yaml =
+            \\---
+            \\a: 1
+            \\b: "asd"
+            \\d: 1
+            \\...
+            ,
+            .container = .{
+                .a = 1,
+                .b = "asd",
+                .c = 5,
+                .d = 1,
+            },
+        },
+    };
+
+    for (&tcs) |tc| {
+        var arena = std.heap.ArenaAllocator.init(testing.allocator);
+        defer arena.deinit();
+        var yamlParser = Yaml{ .source = tc.yaml };
+        try yamlParser.load(arena.allocator());
+        const parsed = try yamlParser.parse(arena.allocator(), TestStruct);
+        try testing.expectEqual(tc.container.a, parsed.a);
+        try testing.expectEqualDeep(tc.container.b, parsed.b);
+        try testing.expectEqual(tc.container.c, parsed.c);
+        try testing.expectEqual(tc.container.d, parsed.d);
+    }
+}
