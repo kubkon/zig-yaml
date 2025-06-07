@@ -416,16 +416,17 @@ fn listBracketed(self: *Parser, gpa: Allocator) ParseError!Node.OptionalIndex {
         if (self.eatToken(.flow_seq_end, &.{.comment})) |pos|
             break pos;
 
+        const value_raw_pos = self.token_it.pos;
         const value_index = try self.value(gpa);
         if (value_index == .none) {
-            return self.fail(gpa, self.token_it.pos, "expecting a value in flow sequence", .{});
+            return self.fail(gpa, value_raw_pos, "expecting a value in flow sequence", .{});
         }
 
         try values.append(gpa, .{ .node = value_index.unwrap().? });
     };
 
-    if (self.eatToken(.comment, &.{.comment})) |_| {
-        return self.fail(gpa, self.token_it.pos, "comments must be separated from other tokens by white space characters", .{});
+    if (self.eatToken(.comment, &.{.comment})) |pos| {
+        return self.fail(gpa, pos, "comments must be separated from other tokens by white space characters", .{});
     }
 
     log.debug("(list) end {s}@{d}", .{ @tagName(self.token(node_end).id), node_end });
