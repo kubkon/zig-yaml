@@ -413,11 +413,21 @@ fn listBracketed(self: *Parser, gpa: Allocator) ParseError!Node.OptionalIndex {
 
         _ = self.eatToken(.comma, &.{.comment});
 
+        if (self.eatToken(.flow_seq_end, &.{.comment})) |pos|
+            break pos;
+
+        const value_raw_pos = self.token_it.pos;
         const value_index = try self.value(gpa);
-        if (value_index == .none) return error.MalformedYaml;
+        if (value_index == .none) {
+            return self.fail(gpa, value_raw_pos, "expecting a value in flow sequence", .{});
+        }
 
         try values.append(gpa, .{ .node = value_index.unwrap().? });
     };
+
+    if (self.eatToken(.comment, &.{.comment})) |pos| {
+        return self.fail(gpa, pos, "comments must be separated from other tokens by white space characters", .{});
+    }
 
     log.debug("(list) end {s}@{d}", .{ @tagName(self.token(node_end).id), node_end });
 
