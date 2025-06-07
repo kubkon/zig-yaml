@@ -175,12 +175,16 @@ fn parseStruct(self: Yaml, arena: Allocator, comptime T: type, map: Map) Error!T
     var parsed: T = undefined;
 
     inline for (struct_info.fields) |field| {
-        const value: ?Value = map.get(field.name) orelse blk: {
+        var value: ?Value = map.get(field.name) orelse blk: {
             const field_name = try mem.replaceOwned(u8, arena, field.name, "_", "-");
             break :blk map.get(field_name);
         };
 
         if (@typeInfo(field.type) == .optional) {
+            if (value == null) blk: {
+                const maybe_default_value = field.defaultValue() orelse break :blk;
+                value = Value.encode(arena, maybe_default_value) catch break :blk;
+            }
             @field(parsed, field.name) = try self.parseOptional(arena, field.type, value);
             continue;
         }
@@ -577,7 +581,7 @@ pub const Value = union(enum) {
                         return encode(arena, @as(Slice, input));
                     },
                     else => {
-                        @compileError("Unhandled type: {s}" ++ @typeName(info.child));
+                        @compileError("Unhandled type: " ++ @typeName(info.child));
                     },
                 },
                 .slice => {
@@ -600,7 +604,7 @@ pub const Value = union(enum) {
                     return Value{ .list = try list.toOwnedSlice(arena) };
                 },
                 else => {
-                    @compileError("Unhandled type: {s}" ++ @typeName(@TypeOf(input)));
+                    @compileError("Unhandled type: " ++ @typeName(@TypeOf(input)));
                 },
             },
 
@@ -609,9 +613,10 @@ pub const Value = union(enum) {
             .optional => return if (input) |val| encode(arena, val) else null,
 
             .null => return null,
+            .bool => return Value{ .boolean = input },
 
             else => {
-                @compileError("Unhandled type: {s}" ++ @typeName(@TypeOf(input)));
+                @compileError("Unhandled type: " ++ @typeName(@TypeOf(input)));
             },
         }
     }
