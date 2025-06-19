@@ -113,6 +113,72 @@ test "several integer bases" {
     try testing.expectEqualSlices(i8, &[_]i8{ 10, -10, 16, -16, 8, -8 }, &arr);
 }
 
+test "simple flow sequence / bracket list" {
+    const source =
+        \\a_key: [a, b, c]
+    ;
+
+    var yaml: Yaml = .{ .source = source };
+    defer yaml.deinit(testing.allocator);
+    try yaml.load(testing.allocator);
+
+    try testing.expectEqual(yaml.docs.items.len, 1);
+
+    const map = yaml.docs.items[0].map;
+
+    const list = map.get("a_key").?.list;
+    try testing.expectEqual(list.len, 3);
+
+    try testing.expectEqualStrings("a", list[0].scalar);
+    try testing.expectEqualStrings("b", list[1].scalar);
+    try testing.expectEqualStrings("c", list[2].scalar);
+}
+
+test "simple flow sequence / bracket list with trailing comma" {
+    const source =
+        \\a_key: [a, b, c,]
+    ;
+
+    var yaml: Yaml = .{ .source = source };
+    defer yaml.deinit(testing.allocator);
+    try yaml.load(testing.allocator);
+
+    try testing.expectEqual(yaml.docs.items.len, 1);
+
+    const map = yaml.docs.items[0].map;
+
+    const list = map.get("a_key").?.list;
+    try testing.expectEqual(list.len, 3);
+
+    try testing.expectEqualStrings("a", list[0].scalar);
+    try testing.expectEqualStrings("b", list[1].scalar);
+    try testing.expectEqualStrings("c", list[2].scalar);
+}
+
+test "simple flow sequence / bracket list with invalid comment" {
+    const source =
+        \\a_key: [a, b, c]#invalid
+    ;
+
+    var yaml: Yaml = .{ .source = source };
+    defer yaml.deinit(testing.allocator);
+    const err = yaml.load(testing.allocator);
+
+    try std.testing.expectError(error.ParseFailure, err);
+}
+
+test "simple flow sequence / bracket list with double trailing commas" {
+    const source =
+        \\a_key: [a, b, c,,]
+    ;
+
+    var yaml: Yaml = .{ .source = source };
+    defer yaml.deinit(testing.allocator);
+    const err = yaml.load(testing.allocator);
+
+    try std.testing.expectError(error.ParseFailure, err);
+}
+
 test "simple map untyped" {
     const source =
         \\a: 0
