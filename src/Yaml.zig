@@ -177,6 +177,7 @@ fn parseStruct(self: Yaml, arena: Allocator, comptime T: type, map: Map) Error!T
     inline for (struct_info.fields) |field| {
         var value: ?Value = map.get(field.name) orelse blk: {
             const field_name = try mem.replaceOwned(u8, arena, field.name, "_", "-");
+            defer arena.free(field_name);
             break :blk map.get(field_name);
         };
 
