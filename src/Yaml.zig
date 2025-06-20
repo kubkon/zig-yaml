@@ -101,7 +101,7 @@ fn parseValue(self: Yaml, arena: Allocator, comptime T: type, value: Value) Erro
             return self.parsePointer(arena, T, .{ .list = list });
         } else |_| {
             const scalar = try value.asScalar();
-            return self.parsePointer(arena, T, .{ .scalar = try arena.dupe(u8, scalar) });
+            return self.parsePointer(arena, T, .{ .scalar = scalar });
         },
         .void => error.TypeMismatch,
         .optional => unreachable,
@@ -177,6 +177,7 @@ fn parseStruct(self: Yaml, arena: Allocator, comptime T: type, map: Map) Error!T
     inline for (struct_info.fields) |field| {
         var value: ?Value = map.get(field.name) orelse blk: {
             const field_name = try mem.replaceOwned(u8, arena, field.name, "_", "-");
+            defer arena.free(field_name);
             break :blk map.get(field_name);
         };
 
