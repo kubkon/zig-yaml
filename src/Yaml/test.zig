@@ -782,3 +782,27 @@ test "struct default value test" {
         try testing.expectEqual(tc.container.d, parsed.d);
     }
 }
+
+test "enums" {
+    const source =
+        \\- a
+        \\- b
+        \\- c
+    ;
+
+    const Enum = enum { a, b, c };
+
+    var yaml: Yaml = .{ .source = source };
+    defer yaml.deinit(testing.allocator);
+    try yaml.load(testing.allocator);
+
+    var arena = Arena.init(testing.allocator);
+    defer arena.deinit();
+
+    const parsed = try yaml.parse(arena.allocator(), []const Enum);
+    try testing.expectEqualDeep(&[_]Enum{
+        .a,
+        .b,
+        .c,
+    }, parsed);
+}
