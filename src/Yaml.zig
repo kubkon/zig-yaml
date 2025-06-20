@@ -101,7 +101,7 @@ fn parseValue(self: Yaml, arena: Allocator, comptime T: type, value: Value) Erro
             return self.parsePointer(arena, T, .{ .list = list });
         } else |_| {
             const scalar = try value.asScalar();
-            return self.parsePointer(arena, T, .{ .scalar = try arena.dupe(u8, scalar) });
+            return self.parsePointer(arena, T, .{ .scalar = scalar });
         },
         .void => error.TypeMismatch,
         .optional => unreachable,
