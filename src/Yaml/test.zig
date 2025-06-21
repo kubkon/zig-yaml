@@ -113,6 +113,72 @@ test "several integer bases" {
     try testing.expectEqualSlices(i8, &[_]i8{ 10, -10, 16, -16, 8, -8 }, &arr);
 }
 
+test "simple flow sequence / bracket list" {
+    const source =
+        \\a_key: [a, b, c]
+    ;
+
+    var yaml: Yaml = .{ .source = source };
+    defer yaml.deinit(testing.allocator);
+    try yaml.load(testing.allocator);
+
+    try testing.expectEqual(yaml.docs.items.len, 1);
+
+    const map = yaml.docs.items[0].map;
+
+    const list = map.get("a_key").?.list;
+    try testing.expectEqual(list.len, 3);
+
+    try testing.expectEqualStrings("a", list[0].scalar);
+    try testing.expectEqualStrings("b", list[1].scalar);
+    try testing.expectEqualStrings("c", list[2].scalar);
+}
+
+test "simple flow sequence / bracket list with trailing comma" {
+    const source =
+        \\a_key: [a, b, c,]
+    ;
+
+    var yaml: Yaml = .{ .source = source };
+    defer yaml.deinit(testing.allocator);
+    try yaml.load(testing.allocator);
+
+    try testing.expectEqual(yaml.docs.items.len, 1);
+
+    const map = yaml.docs.items[0].map;
+
+    const list = map.get("a_key").?.list;
+    try testing.expectEqual(list.len, 3);
+
+    try testing.expectEqualStrings("a", list[0].scalar);
+    try testing.expectEqualStrings("b", list[1].scalar);
+    try testing.expectEqualStrings("c", list[2].scalar);
+}
+
+test "simple flow sequence / bracket list with invalid comment" {
+    const source =
+        \\a_key: [a, b, c]#invalid
+    ;
+
+    var yaml: Yaml = .{ .source = source };
+    defer yaml.deinit(testing.allocator);
+    const err = yaml.load(testing.allocator);
+
+    try std.testing.expectError(error.ParseFailure, err);
+}
+
+test "simple flow sequence / bracket list with double trailing commas" {
+    const source =
+        \\a_key: [a, b, c,,]
+    ;
+
+    var yaml: Yaml = .{ .source = source };
+    defer yaml.deinit(testing.allocator);
+    const err = yaml.load(testing.allocator);
+
+    try std.testing.expectError(error.ParseFailure, err);
+}
+
 test "simple map untyped" {
     const source =
         \\a: 0
@@ -640,4 +706,79 @@ test "stringify a list" {
 
     const arr: [3]i64 = .{ 1, 2, 3 };
     try testStringify("[ 1, 2, 3 ]", arr);
+}
+
+test "struct default value test" {
+    const TestStruct = struct {
+        a: i32,
+        b: ?[]const u8 = "test",
+        c: ?u8 = 5,
+        d: u8,
+    };
+
+    const TestCase = struct {
+        yaml: []const u8,
+        container: TestStruct,
+    };
+
+    const tcs = [_]TestCase{
+        .{
+            .yaml =
+            \\---
+            \\a: 1
+            \\b: "asd"
+            \\c: 3
+            \\d: 1
+            \\...
+            ,
+            .container = .{
+                .a = 1,
+                .b = "asd",
+                .c = 3,
+                .d = 1,
+            },
+        },
+        .{
+            .yaml =
+            \\---
+            \\a: 1
+            \\c: 3
+            \\d: 1
+            \\...
+            ,
+            .container = .{
+                .a = 1,
+                .b = "test",
+                .c = 3,
+                .d = 1,
+            },
+        },
+        .{
+            .yaml =
+            \\---
+            \\a: 1
+            \\b: "asd"
+            \\d: 1
+            \\...
+            ,
+            .container = .{
+                .a = 1,
+                .b = "asd",
+                .c = 5,
+                .d = 1,
+            },
+        },
+    };
+
+    for (&tcs) |tc| {
+        var arena = std.heap.ArenaAllocator.init(testing.allocator);
+        defer arena.deinit();
+        var yamlParser = Yaml{ .source = tc.yaml };
+        try yamlParser.load(arena.allocator());
+        const parsed = try yamlParser.parse(arena.allocator(), TestStruct);
+        try testing.expectEqual(tc.container.a, parsed.a);
+        try testing.expectEqualDeep(tc.container.b, parsed.b);
+        try testing.expectEqual(tc.container.c, parsed.c);
+        try testing.expectEqual(tc.container.d, parsed.d);
+    }
 }
