@@ -708,6 +708,31 @@ test "stringify a list" {
     try testStringify("[ 1, 2, 3 ]", arr);
 }
 
+test "pointer of a value" {
+    const TestStruct = struct {
+        a: usize,
+        b: i64,
+        c: u12,
+    };
+
+    const source =
+        \\a: 1
+        \\b: 2
+        \\c: 3
+    ;
+
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+
+    var yaml = Yaml{ .source = source };
+    try yaml.load(arena.allocator());
+
+    const parsed = try yaml.parse(arena.allocator(), *TestStruct);
+    try testing.expectEqual(1, parsed.a);
+    try testing.expectEqual(2, parsed.b);
+    try testing.expectEqual(3, parsed.c);
+}
+
 test "struct default value test" {
     const TestStruct = struct {
         a: i32,
