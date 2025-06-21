@@ -581,7 +581,7 @@ pub const Value = union(enum) {
                         return encode(arena, @as(Slice, input));
                     },
                     else => {
-                        @compileError("Unhandled type: " ++ @typeName(info.child));
+                        return encode(arena, input);
                     },
                 },
                 .slice => {
