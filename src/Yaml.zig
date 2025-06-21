@@ -97,11 +97,13 @@ fn parseValue(self: Yaml, arena: Allocator, comptime T: type, value: Value) Erro
         .@"struct" => self.parseStruct(arena, T, try value.asMap()),
         .@"union" => self.parseUnion(arena, T, value),
         .array => self.parseArray(arena, T, try value.asList()),
-        .pointer => if (value.asList()) |list| {
+        .pointer => if (value.asList() catch null) |list| {
             return self.parsePointer(arena, T, .{ .list = list });
-        } else |_| {
-            const scalar = try value.asScalar();
+        } else if (value.asScalar()) |scalar| {
             return self.parsePointer(arena, T, .{ .scalar = try arena.dupe(u8, scalar) });
+        } else |_| {
+            const map = try value.asMap();
+            return self.parsePointer(arena, T, .{ .map = map });
         },
         .void => error.TypeMismatch,
         .optional => unreachable,
@@ -212,6 +214,11 @@ fn parsePointer(self: Yaml, arena: Allocator, comptime T: type, value: Value) Er
             for (value.list, 0..) |elem, i| {
                 parsed[i] = try self.parseValue(arena, ptr_info.child, elem);
             }
+            return parsed;
+        },
+        .one => {
+            const parsed = try arena.create(ptr_info.child);
+            parsed.* = try self.parseValue(arena, ptr_info.child, value);
             return parsed;
         },
         else => return error.Unimplemented,
@@ -581,7 +588,7 @@ pub const Value = union(enum) {
                         return encode(arena, @as(Slice, input));
                     },
                     else => {
-                        @compileError("Unhandled type: " ++ @typeName(info.child));
+                        return encode(arena, input);
                     },
                 },
                 .slice => {
