@@ -288,6 +288,7 @@ pub const Value = union(enum) {
     scalar: []const u8,
     list: List,
     map: Map,
+    boolean: bool,
 
     pub fn deinit(self: *Value, gpa: Allocator) void {
         switch (self.*) {
@@ -305,7 +306,7 @@ pub const Value = union(enum) {
                 }
                 map.deinit(gpa);
             },
-            .empty => {},
+            .empty, .boolean => {},
         }
     }
 
