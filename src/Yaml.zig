@@ -189,6 +189,12 @@ fn parseStruct(self: Yaml, arena: Allocator, comptime T: type, map: Map) Error!T
             continue;
         }
 
+        if (field.defaultValue()) |default_value| {
+            if (value == null) blk: {
+                value = Value.encode(arena, default_value) catch break :blk;
+            }
+        }
+
         const unwrapped = value orelse {
             log.debug("missing struct field: {s}: {s}", .{ field.name, @typeName(field.type) });
             return error.StructFieldMissing;
