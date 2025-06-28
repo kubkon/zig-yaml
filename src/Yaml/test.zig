@@ -179,6 +179,76 @@ test "simple flow sequence / bracket list with double trailing commas" {
     try std.testing.expectError(error.ParseFailure, err);
 }
 
+test "bools" {
+    const source =
+        \\- false
+        \\- true
+        \\- off
+        \\- on
+        \\- no
+        \\- yes
+        \\- n
+        \\- y
+    ;
+
+    var yaml: Yaml = .{ .source = source };
+    defer yaml.deinit(testing.allocator);
+    try yaml.load(testing.allocator);
+
+    try testing.expectEqual(yaml.docs.items.len, 1);
+
+    var arena = Arena.init(testing.allocator);
+    defer arena.deinit();
+
+    const arr = try yaml.parse(arena.allocator(), [8]bool);
+    try testing.expectEqualSlices(bool, &[_]bool{ false, true, false, true, false, true, false, true, }, &arr);
+}
+
+const TestEnum = enum {
+    alpha,
+    bravo,
+    charlie,
+};
+
+test "enums" {
+    const source =
+        \\- alpha
+        \\- bravo
+        \\- charlie
+    ;
+
+    var yaml: Yaml = .{ .source = source };
+    defer yaml.deinit(testing.allocator);
+    try yaml.load(testing.allocator);
+
+    try testing.expectEqual(yaml.docs.items.len, 1);
+
+    var arena = Arena.init(testing.allocator);
+    defer arena.deinit();
+
+    const arr = try yaml.parse(arena.allocator(), [3]TestEnum);
+    try testing.expectEqualSlices(TestEnum, &[_]TestEnum{ .alpha, .bravo, .charlie }, &arr);
+}
+
+test "invalid enum" {
+    const source =
+        \\- delta
+        \\- echo
+    ;
+
+    var yaml: Yaml = .{ .source = source };
+    defer yaml.deinit(testing.allocator);
+    try yaml.load(testing.allocator);
+
+    try testing.expectEqual(yaml.docs.items.len, 1);
+
+    var arena = Arena.init(testing.allocator);
+    defer arena.deinit();
+
+    const result = yaml.parse(arena.allocator(), [2]TestEnum);
+    try testing.expectError(Yaml.Error.EnumTagMissing, result);
+}
+
 test "simple map untyped" {
     const source =
         \\a: 0
@@ -781,4 +851,15 @@ test "struct default value test" {
         try testing.expectEqual(tc.container.c, parsed.c);
         try testing.expectEqual(tc.container.d, parsed.d);
     }
+}
+
+test "stringify a bool" {
+    try testStringify("false", false);
+    try testStringify("true", true);
+}
+
+test "stringify an enum" {
+    try testStringify("alpha", TestEnum.alpha);
+    try testStringify("bravo", TestEnum.bravo);
+    try testStringify("charlie", TestEnum.charlie);
 }
