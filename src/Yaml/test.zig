@@ -27,6 +27,28 @@ test "simple list" {
     try testing.expectEqualStrings("c", list[2].scalar);
 }
 
+test "simple list parsed as booleans" {
+    const source =
+        \\- true
+        \\- false
+        \\- true
+    ;
+
+    var yaml: Yaml = .{ .source = source };
+    defer yaml.deinit(testing.allocator);
+    try yaml.load(testing.allocator);
+
+    var arena = Arena.init(testing.allocator);
+    defer arena.deinit();
+
+    const parsed = try yaml.parse(arena.allocator(), []const bool);
+    try testing.expectEqual(parsed.len, 3);
+
+    try testing.expectEqual(true, parsed[0]);
+    try testing.expectEqual(false, parsed[1]);
+    try testing.expectEqual(true, parsed[2]);
+}
+
 test "simple list typed as array of strings" {
     const source =
         \\- a
