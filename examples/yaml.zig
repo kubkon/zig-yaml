@@ -18,7 +18,7 @@ const usage =
 
 var log_scopes: std.ArrayList([]const u8) = std.ArrayList([]const u8).init(gpa.allocator());
 
-pub fn log(
+fn logFn(
     comptime level: std.log.Level,
     comptime scope: @TypeOf(.EnumLiteral),
     comptime format: []const u8,
@@ -27,7 +27,7 @@ pub fn log(
     // Hide debug messages unless:
     // * logging enabled with `-Dlog`.
     // * the --debug-log arg for the scope has been provided
-    if (@intFromEnum(level) > @intFromEnum(std.log.level) or
+    if (@intFromEnum(level) > @intFromEnum(std.options.log_level) or
         @intFromEnum(level) > @intFromEnum(std.log.Level.info))
     {
         if (!build_options.enable_logging) return;
@@ -51,6 +51,8 @@ pub fn log(
     // Print the message to stderr, silently ignoring any errors
     std.debug.print(prefix1 ++ prefix2 ++ format ++ "\n", args);
 }
+
+pub const std_options: std.Options = .{ .logFn = logFn };
 
 pub fn main() !void {
     var arena = std.heap.ArenaAllocator.init(gpa.allocator());
