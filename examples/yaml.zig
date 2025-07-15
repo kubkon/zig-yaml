@@ -3,7 +3,6 @@ const assert = std.debug.assert;
 const build_options = @import("build_options");
 const Yaml = @import("yaml").Yaml;
 
-const io = std.io;
 const mem = std.mem;
 
 var gpa = std.heap.GeneralPurposeAllocator(.{}){};
@@ -61,14 +60,14 @@ pub fn main() !void {
     const all_args = try std.process.argsAlloc(allocator);
     const args = all_args[1..];
 
-    const stdout = io.getStdOut().writer();
-    const stderr = io.getStdErr().writer();
+    const stdout = std.fs.File.stdout();
+    const stderr = std.fs.File.stderr();
 
     var file_path: ?[]const u8 = null;
     var arg_index: usize = 0;
     while (arg_index < args.len) : (arg_index += 1) {
         if (mem.eql(u8, "-h", args[arg_index]) or mem.eql(u8, "--help", args[arg_index])) {
-            return io.getStdOut().writeAll(usage);
+            return stdout.writeAll(usage);
         } else if (mem.eql(u8, "--debug-log", args[arg_index])) {
             if (arg_index + 1 >= args.len) {
                 return stderr.writeAll("fatal: expected [scope] after --debug-log\n\n");
@@ -99,11 +98,12 @@ pub fn main() !void {
     yaml.load(allocator) catch |err| switch (err) {
         error.ParseFailure => {
             assert(yaml.parse_errors.errorMessageCount() > 0);
-            yaml.parse_errors.renderToStdErr(.{ .ttyconf = std.io.tty.detectConfig(std.io.getStdErr()) });
+            yaml.parse_errors.renderToStdErr(.{ .ttyconf = std.io.tty.detectConfig(stderr) });
             return error.ParseFailure;
         },
         else => return err,
     };
 
-    try yaml.stringify(stdout);
+    var writer = stdout.writer(&[0]u8{});
+    try yaml.stringify(&writer.interface);
 }
