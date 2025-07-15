@@ -44,9 +44,9 @@ test "simple list parsed as booleans" {
     const parsed = try yaml.parse(arena.allocator(), []const bool);
     try testing.expectEqual(parsed.len, 3);
 
-    try testing.expectEqual(true, parsed[0]);
-    try testing.expectEqual(false, parsed[1]);
-    try testing.expectEqual(true, parsed[2]);
+    try testing.expect(parsed[0]);
+    try testing.expect(!parsed[1]);
+    try testing.expect(parsed[2]);
 }
 
 test "simple list typed as array of strings" {
