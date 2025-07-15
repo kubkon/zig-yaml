@@ -628,13 +628,13 @@ fn parseError2(source: []const u8, comptime format: []const u8, args: anytype) !
     defer bundle.deinit(testing.allocator);
     try testing.expect(bundle.errorMessageCount() > 0);
 
-    var given: std.ArrayListUnmanaged(u8) = .empty;
-    defer given.deinit(testing.allocator);
-    try bundle.renderToWriter(.{ .ttyconf = .no_color }, given.writer(testing.allocator));
+    var given: std.Io.Writer.Allocating = .init(testing.allocator);
+    defer given.deinit();
+    try bundle.renderToWriter(.{ .ttyconf = .no_color }, &given.writer);
 
     const expected = try std.fmt.allocPrint(testing.allocator, format, args);
     defer testing.allocator.free(expected);
-    try testing.expectEqualStrings(expected, given.items);
+    try testing.expectEqualStrings(expected, given.getWritten());
 }
 
 test "empty doc with spaces and comments" {
