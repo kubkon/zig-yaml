@@ -201,6 +201,65 @@ test "simple flow sequence / bracket list with double trailing commas" {
     try std.testing.expectError(error.ParseFailure, err);
 }
 
+test "more bools" {
+    const source =
+        \\- false
+        \\- true
+        \\- off
+        \\- on
+        \\- no
+        \\- yes
+        \\- n
+        \\- y
+    ;
+
+    var yaml: Yaml = .{ .source = source };
+    defer yaml.deinit(testing.allocator);
+    try yaml.load(testing.allocator);
+
+    try testing.expectEqual(yaml.docs.items.len, 1);
+
+    var arena = Arena.init(testing.allocator);
+    defer arena.deinit();
+
+    const arr = try yaml.parse(arena.allocator(), [8]bool);
+    try testing.expectEqualSlices(bool, &[_]bool{
+        false,
+        true,
+        false,
+        true,
+        false,
+        true,
+        false,
+        true,
+    }, &arr);
+}
+
+test "invalid enum" {
+    const TestEnum = enum {
+        alpha,
+        bravo,
+        charlie,
+    };
+
+    const source =
+        \\- delta
+        \\- echo
+    ;
+
+    var yaml: Yaml = .{ .source = source };
+    defer yaml.deinit(testing.allocator);
+    try yaml.load(testing.allocator);
+
+    try testing.expectEqual(yaml.docs.items.len, 1);
+
+    var arena = Arena.init(testing.allocator);
+    defer arena.deinit();
+
+    const result = yaml.parse(arena.allocator(), [2]TestEnum);
+    try testing.expectError(Yaml.Error.InvalidEnum, result);
+}
+
 test "simple map untyped" {
     const source =
         \\a: 0
@@ -841,4 +900,21 @@ test "enums" {
         .b,
         .c,
     }, parsed);
+}
+
+test "stringify a bool" {
+    try testStringify("false", false);
+    try testStringify("true", true);
+}
+
+test "stringify an enum" {
+    const TestEnum = enum {
+        alpha,
+        bravo,
+        charlie,
+    };
+
+    try testStringify("alpha", TestEnum.alpha);
+    try testStringify("bravo", TestEnum.bravo);
+    try testStringify("charlie", TestEnum.charlie);
 }
