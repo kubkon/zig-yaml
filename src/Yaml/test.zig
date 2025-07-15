@@ -644,11 +644,11 @@ test "duplicate map keys" {
 }
 
 fn testStringify(expected: []const u8, input: anytype) !void {
-    var output = std.ArrayList(u8).init(testing.allocator);
-    defer output.deinit();
+    var writer: std.Io.Writer.Allocating = .init(testing.allocator);
+    defer writer.deinit();
 
-    try stringify(testing.allocator, input, output.writer());
-    try testing.expectEqualStrings(expected, output.items);
+    try stringify(testing.allocator, input, &writer.writer);
+    try testing.expectEqualStrings(expected, writer.getWritten());
 }
 
 test "stringify an int" {

@@ -153,7 +153,7 @@ fn make(step: *Step, make_options: Step.MakeOptions) !void {
     const sub_path_dirname = fs.path.dirname(sub_path).?;
 
     b.cache_root.handle.makePath(sub_path_dirname) catch |err| {
-        return step.fail("unable to make path '{}{s}': {}", .{ b.cache_root, sub_path_dirname, err });
+        return step.fail("unable to make path '{?s}{s}': {any}", .{ b.cache_root.path, sub_path_dirname, err });
     };
 
     b.cache_root.handle.writeFile(.{ .sub_path = sub_path, .data = output.items }) catch |err| {
@@ -597,8 +597,8 @@ const expect_err_template =
 ;
 
 fn emitTest(arena: Allocator, output: *std.ArrayList(u8), testcase: Testcase) !void {
-    const head = try std.fmt.allocPrint(arena, "test \"{}\" {{\n", .{
-        std.zig.fmtEscapes(testcase.name),
+    const head = try std.fmt.allocPrint(arena, "test \"{f}\" {{\n", .{
+        std.zig.fmtString(testcase.name),
     });
     try output.appendSlice(head);
 

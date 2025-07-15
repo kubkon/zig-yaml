@@ -22,7 +22,7 @@ jobs:
         version: master
     - run: zig fmt --check src 
     - run: zig build test
-    - run: zig build run
+    - run: zig build run -- examples/lists.yml
 
   spec-test:
     name: YAML Test Suite
