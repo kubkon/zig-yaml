@@ -713,7 +713,7 @@ test "struct default value test" {
         a: i32,
         b: ?[]const u8 = "test",
         c: ?u8 = 5,
-        d: u8,
+        d: u8 = 12,
     };
 
     const TestCase = struct {
@@ -766,6 +766,20 @@ test "struct default value test" {
                 .b = "asd",
                 .c = 5,
                 .d = 1,
+            },
+        },
+        .{
+            .yaml =
+            \\---
+            \\a: 1
+            \\b: "asd"
+            \\...
+            ,
+            .container = .{
+                .a = 1,
+                .b = "asd",
+                .c = 5,
+                .d = 12,
             },
         },
     };
