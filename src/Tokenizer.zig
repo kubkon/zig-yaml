@@ -30,6 +30,8 @@ pub const Token = struct {
         flow_map_end,   // }
         flow_seq_start, // [
         flow_seq_end,   // ]
+        block_literal,  // |
+        block_folded,   // >
 
         comma,
         space,
@@ -197,6 +199,16 @@ pub fn next(self: *Tokenizer) Token {
                     result.id = .flow_seq_end;
                     self.index += 1;
                     self.in_flow -|= 1;
+                    break;
+                },
+                '|' => {
+                    result.id = .block_literal;
+                    self.index += 1;
+                    break;
+                },
+                '>' => {
+                    result.id = .block_folded;
+                    self.index += 1;
                     break;
                 },
                 ':' => {
