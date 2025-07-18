@@ -789,6 +789,40 @@ test "stringify a list" {
     try testStringify("[ 1, 2, 3 ]", arr);
 }
 
+test "pointer of a value" {
+    const TestStruct = struct {
+        a: usize,
+        b: i64,
+        c: u12,
+        d: ?*const @This() = null,
+    };
+
+    const source =
+        \\a: 1
+        \\b: 2
+        \\c: 3
+        \\d:
+        \\  a: 4
+        \\  b: 5
+        \\  c: 6
+    ;
+
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+
+    var yaml = Yaml{ .source = source };
+    try yaml.load(arena.allocator());
+
+    const parsed = try yaml.parse(arena.allocator(), *TestStruct);
+    try testing.expectEqual(1, parsed.a);
+    try testing.expectEqual(2, parsed.b);
+    try testing.expectEqual(3, parsed.c);
+    try testing.expectEqual(4, parsed.d.?.a);
+    try testing.expectEqual(5, parsed.d.?.b);
+    try testing.expectEqual(6, parsed.d.?.c);
+    try testing.expectEqual(@as(?*const TestStruct, null), parsed.d.?.d);
+}
+
 test "struct default value test" {
     const TestStruct = struct {
         a: i32,
