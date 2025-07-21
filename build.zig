@@ -16,14 +16,14 @@ pub fn build(b: *std.Build) void {
         .root_module = yaml_module,
     });
 
-    const example_module = b.addModule("yaml", .{
+    const cli = b.addModule("cli", .{
         .root_source_file = b.path("examples/yaml.zig"),
         .target = target,
         .optimize = optimize,
     });
     const example = b.addExecutable(.{
         .name = "yaml",
-        .root_module = example_module,
+        .root_module = cli,
     });
     example.root_module.addImport("yaml", yaml_module);
 
