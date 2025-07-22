@@ -94,17 +94,20 @@ fn parseValue(self: Yaml, arena: Allocator, comptime T: type, value: Value) Erro
         .int => self.parseInt(T, value),
         .bool => self.parseBoolean(bool, value),
         .float => self.parseFloat(T, value),
-        .@"struct" => self.parseStruct(arena, T, try value.asMap()),
+        .@"struct" => if (value.asMap()) |map| {
+            return self.parseStruct(arena, T, map);
+        } else return error.TypeMismatch,
         .@"union" => self.parseUnion(arena, T, value),
-        .array => self.parseArray(arena, T, try value.asList()),
-        .pointer => if (value.asList() catch null) |list| {
+        .array => if (value.asList()) |list| {
+            return self.parseArray(arena, T, list);
+        } else return error.TypeMismatch,
+        .pointer => if (value.asList()) |list| {
             return self.parsePointer(arena, T, .{ .list = list });
         } else if (value.asScalar()) |scalar| {
             return self.parsePointer(arena, T, .{ .scalar = try arena.dupe(u8, scalar) });
-        } else |_| {
-            const map = try value.asMap();
+        } else if (value.asMap()) |map| {
             return self.parsePointer(arena, T, .{ .map = map });
-        },
+        } else return error.TypeMismatch,
         .@"enum" => self.parseEnum(T, value),
         .void => error.TypeMismatch,
         .optional => unreachable,
@@ -114,19 +117,19 @@ fn parseValue(self: Yaml, arena: Allocator, comptime T: type, value: Value) Erro
 
 fn parseInt(self: Yaml, comptime T: type, value: Value) Error!T {
     _ = self;
-    const scalar = try value.asScalar();
+    const scalar = value.asScalar() orelse return error.TypeMismatch;
     return try std.fmt.parseInt(T, scalar, 0);
 }
 
 fn parseFloat(self: Yaml, comptime T: type, value: Value) Error!T {
     _ = self;
-    const scalar = try value.asScalar();
+    const scalar = value.asScalar() orelse return error.TypeMismatch;
     return try std.fmt.parseFloat(T, scalar);
 }
 
 fn parseBoolean(self: Yaml, comptime T: type, value: Value) Error!T {
     _ = self;
-    const raw = try value.asScalar();
+    const raw = value.asScalar() orelse return error.TypeMismatch;
 
     if (raw.len > 0 and raw.len <= longestBooleanValueString) {
         var buffer: [longestBooleanValueString]u8 = undefined;
@@ -214,7 +217,8 @@ fn parsePointer(self: Yaml, arena: Allocator, comptime T: type, value: Value) Er
     switch (ptr_info.size) {
         .slice => {
             if (ptr_info.child == u8) {
-                return try arena.dupe(u8, try value.asScalar());
+                const scalar = value.asScalar() orelse return error.TypeMismatch;
+                return try arena.dupe(u8, scalar);
             }
 
             var parsed = try arena.alloc(ptr_info.child, value.list.len);
@@ -247,7 +251,7 @@ fn parseArray(self: Yaml, arena: Allocator, comptime T: type, list: List) Error!
 fn parseEnum(self: Yaml, comptime T: type, value: Value) Error!T {
     _ = self;
 
-    const scalar = try value.asScalar();
+    const scalar = value.asScalar() orelse return error.TypeMismatch;
     return std.meta.stringToEnum(T, scalar) orelse error.InvalidEnum;
 }
 
@@ -332,18 +336,18 @@ pub const Value = union(enum) {
         }
     }
 
-    pub fn asScalar(self: Value) ![]const u8 {
-        if (self != .scalar) return error.TypeMismatch;
+    pub fn asScalar(self: Value) ?[]const u8 {
+        if (self != .scalar) return null;
         return self.scalar;
     }
 
-    pub fn asList(self: Value) !List {
-        if (self != .list) return error.TypeMismatch;
+    pub fn asList(self: Value) ?List {
+        if (self != .list) return null;
         return self.list;
     }
 
-    pub fn asMap(self: Value) !Map {
-        if (self != .map) return error.TypeMismatch;
+    pub fn asMap(self: Value) ?Map {
+        if (self != .map) return null;
         return self.map;
     }
 
