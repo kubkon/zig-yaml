@@ -221,11 +221,15 @@ fn parsePointer(self: Yaml, arena: Allocator, comptime T: type, value: Value) Er
                 return try arena.dupe(u8, scalar);
             }
 
-            var parsed = try arena.alloc(ptr_info.child, value.list.len);
-            for (value.list, 0..) |elem, i| {
-                parsed[i] = try self.parseValue(arena, ptr_info.child, elem);
+            if (value.asList()) |list| {
+                var parsed = try arena.alloc(ptr_info.child, list.len);
+                for (list, 0..) |elem, i| {
+                    parsed[i] = try self.parseValue(arena, ptr_info.child, elem);
+                }
+                return parsed;
             }
-            return parsed;
+
+            return error.TypeMismatch;
         },
         .one => {
             const parsed = try arena.create(ptr_info.child);
