@@ -952,3 +952,24 @@ test "stringify an enum" {
     try testStringify("bravo", TestEnum.bravo);
     try testStringify("charlie", TestEnum.charlie);
 }
+
+test "parse struct as list of structs" {
+    const source =
+        \\a: 1
+    ;
+
+    const Struct = struct { a: u32 };
+
+    var yaml: Yaml = .{ .source = source };
+    defer yaml.deinit(testing.allocator);
+    try yaml.load(testing.allocator);
+
+    var arena = Arena.init(testing.allocator);
+    defer arena.deinit();
+
+    const result = yaml.parse(arena.allocator(), []Struct);
+    try testing.expectError(error.TypeMismatch, result);
+
+    const parsed = try yaml.parse(arena.allocator(), Struct);
+    try testing.expectEqualDeep(Struct{ .a = 1 }, parsed);
+}
