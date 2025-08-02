@@ -168,6 +168,11 @@ fn value(self: *Parser, gpa: Allocator) ParseError!Node.OptionalIndex {
             self.token_it.seekBy(-1);
             return self.listBracketed(gpa);
         },
+        .flow_map_start => {
+            // map
+            self.token_it.seekBy(-1);
+            return self.mapBracketed(gpa);
+        },
         else => return .none,
     }
 }
@@ -308,6 +313,88 @@ fn map(self: *Parser, gpa: Allocator) ParseError!Node.OptionalIndex {
     }
 
     const node_end: Token.Index = @enumFromInt(@intFromEnum(self.token_it.pos) - 1);
+
+    log.debug("(map) end {s}@{d}", .{ @tagName(self.token(node_end).id), node_end });
+
+    const scope: Node.Scope = .{
+        .start = node_start,
+        .end = node_end,
+    };
+
+    if (entries.items.len == 1) {
+        const entry = entries.items[0];
+
+        self.nodes.set(node_index, .{
+            .tag = .map_single,
+            .scope = scope,
+            .data = .{ .map = .{
+                .key = entry.key,
+                .maybe_node = entry.maybe_node,
+            } },
+        });
+    } else {
+        try self.extra.ensureUnusedCapacity(gpa, entries.items.len * 2 + 1);
+        const extra_index: u32 = @intCast(self.extra.items.len);
+
+        _ = self.addExtraAssumeCapacity(Map{ .map_len = @intCast(entries.items.len) });
+
+        for (entries.items) |entry| {
+            _ = self.addExtraAssumeCapacity(entry);
+        }
+
+        self.nodes.set(node_index, .{
+            .tag = .map_many,
+            .scope = scope,
+            .data = .{ .extra = @enumFromInt(extra_index) },
+        });
+    }
+
+    return @as(Node.Index, @enumFromInt(node_index)).toOptional();
+}
+
+fn mapBracketed(self: *Parser, gpa: Allocator) ParseError!Node.OptionalIndex {
+    const node_index = try self.nodes.addOne(gpa);
+    const node_start = self.token_it.pos;
+
+    var entries: std.ArrayListUnmanaged(Map.Entry) = .empty;
+    defer entries.deinit(gpa);
+
+    log.debug("(map) begin {s}@{d}", .{ @tagName(self.token(node_start).id), node_start });
+
+    _ = try self.expectToken(.flow_map_start, &.{});
+
+    const node_end: Token.Index = while (true) {
+        self.eatCommentsAndSpace(&.{.comment});
+
+        if (self.eatToken(.flow_map_end, &.{.comment})) |pos|
+            break pos;
+
+        _ = self.eatToken(.comma, &.{.comment});
+
+        self.eatCommentsAndSpace(&.{.comment});
+
+        // Parse key
+        const key_pos = self.token_it.pos;
+        const key = self.token_it.next() orelse return error.UnexpectedEof;
+        switch (key.id) {
+            .literal => {},
+            else => return self.fail(gpa, self.token_it.pos, "unexpected token for 'key': {}", .{key}),
+        }
+
+        log.debug("(map) key {s}@{d}", .{ self.rawString(key_pos, key_pos), key_pos });
+
+        // Separator
+        _ = self.expectToken(.map_value_ind, &.{ .new_line, .comment }) catch
+            return self.fail(gpa, self.token_it.pos, "expected map separator ':'", .{});
+
+        // Parse value
+        const value_index = try self.value(gpa);
+
+        try entries.append(gpa, .{
+            .key = key_pos,
+            .maybe_node = value_index,
+        });
+    };
 
     log.debug("(map) end {s}@{d}", .{ @tagName(self.token(node_end).id), node_end });
 
