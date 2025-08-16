@@ -168,6 +168,11 @@ fn value(self: *Parser, gpa: Allocator) ParseError!Node.OptionalIndex {
             self.token_it.seekBy(-1);
             return self.listBracketed(gpa);
         },
+        .block_literal, .block_folded => {
+            self.token_it.seekBy(-1);
+            const t = self.token_it.next().?;
+            return self.parseBlockScalar(gpa, t.id);
+        },
         else => return .none,
     }
 }
@@ -265,7 +270,8 @@ fn map(self: *Parser, gpa: Allocator) ParseError!Node.OptionalIndex {
 
         // Parse key
         const key_pos = self.token_it.pos;
-        if (self.getCol(key_pos) < col) break;
+        const key_col = self.getCol(key_pos);
+        if (key_col != col) break;
 
         const key = self.token_it.next() orelse return error.UnexpectedEof;
         switch (key.id) {
@@ -285,6 +291,10 @@ fn map(self: *Parser, gpa: Allocator) ParseError!Node.OptionalIndex {
         // Separator
         _ = self.expectToken(.map_value_ind, &.{ .new_line, .comment }) catch
             return self.fail(gpa, self.token_it.pos, "expected map separator ':'", .{});
+
+        // add for block scalar parsing as it's literal value can begain on
+        // the next line
+        self.eatCommentsAndSpace(&.{});
 
         // Parse value
         const value_index = try self.value(gpa);
@@ -554,6 +564,9 @@ fn leafValue(self: *Parser, gpa: Allocator) ParseError!Node.OptionalIndex {
                     }
                 }
             },
+            .block_literal, .block_folded => {
+                return try self.parseBlockScalar(gpa, tok.id);
+            },
             else => {
                 self.token_it.seekBy(-1);
                 const node_end: Token.Index = @enumFromInt(@intFromEnum(self.token_it.pos) - 1);
@@ -717,6 +730,94 @@ fn parseDoubleQuoted(self: *Parser, gpa: Allocator, raw: []const u8) ParseError!
     }
 
     return string;
+}
+
+// Token.Id are .block_literal or .block_folded
+fn parseBlockScalar(
+    self: *Parser,
+    gpa: Allocator,
+    id: Token.Id, // either .block_literal or .block_folded
+) ParseError!Node.OptionalIndex {
+    const node_index: Node.Index = @enumFromInt(try self.nodes.addOne(gpa));
+    const node_start: Token.Index = @enumFromInt(@intFromEnum(self.token_it.pos) - 1);
+
+    var lines = std.ArrayListUnmanaged([]const u8){};
+    defer lines.deinit(gpa);
+
+    while (self.token_it.peek()) |tok| {
+        switch (tok.id) {
+            .new_line => {
+                const la_idx = @intFromEnum(self.token_it.pos) + 1;
+                const lookahead = self.tokens.get(la_idx);
+
+                switch (lookahead.token.id) {
+                    .space => {
+                        const next_idx = la_idx + 1;
+                        const next = self.tokens.get(next_idx);
+                        if (next.token.id == .literal or next.token.id == .block_literal or next.token.id == .block_folded) {
+                            self.token_it.seekBy(1); // consume .new_line
+                            continue;
+                        }
+                    },
+                    else => {},
+                }
+                break;
+            },
+
+            .space => {
+                var line_buf = std.ArrayListUnmanaged(u8){};
+                defer line_buf.deinit(gpa);
+
+                while (self.token_it.peek()) |t| {
+                    switch (t.id) {
+                        .space, .literal, .block_literal, .block_folded => {
+                            const this_idx = self.token_it.pos;
+                            const text = self.rawString(this_idx, this_idx);
+                            try line_buf.appendSlice(gpa, text);
+                            _ = self.token_it.next();
+                        },
+                        else => break,
+                    }
+                }
+
+                const line = try line_buf.toOwnedSlice(gpa);
+                try lines.append(gpa, line);
+            },
+            else => break,
+        }
+    }
+
+    // Join lines into one string
+    var joined = std.ArrayListUnmanaged(u8){};
+    defer joined.deinit(gpa);
+
+    if (id == .block_literal) {
+        try joined.append(gpa, '\n'); // <-- force initial newline
+    }
+
+    for (lines.items, 0..) |line, i| {
+        try joined.appendSlice(gpa, line);
+        if (i + 1 < lines.items.len) {
+            if (id == .block_literal) {
+                try joined.append(gpa, '\n');
+            } else if (id == .block_folded) {
+                try joined.append(gpa, ' ');
+            }
+        }
+    }
+
+    const str = try self.addString(gpa, joined.items);
+
+    self.nodes.set(@intFromEnum(node_index), .{
+        .tag = .string_value,
+        .scope = .{
+            .start = node_start,
+            .end = @enumFromInt(@intFromEnum(self.token_it.pos) - 1),
+        },
+        .data = .{ .string = str },
+    });
+
+    return node_index.toOptional();
 }
 
 fn rawString(self: Parser, start: Token.Index, end: Token.Index) []const u8 {

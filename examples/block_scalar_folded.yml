@@ -1,0 +1,4 @@
+# should not preserve \n in the multiline string
+key: >
+ Your long
+ string here.
