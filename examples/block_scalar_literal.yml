@@ -1,0 +1,4 @@
+# preserve \n in the multiline string
+key: |
+  \//||\/||
+  // ||  ||__
