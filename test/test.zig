@@ -11,8 +11,10 @@ const gpa = testing.allocator;
 fn loadFromFile(file_path: []const u8) !Yaml {
     const file = try std.fs.cwd().openFile(file_path, .{});
     defer file.close();
+    var buf: [1024]u8 = undefined;
+    var file_reader = file.reader(&buf);
 
-    const source = try file.readToEndAlloc(gpa, std.math.maxInt(u32));
+    const source = try file_reader.interface.allocRemaining(gpa, .unlimited);
     defer gpa.free(source);
 
     var yaml: Yaml = .{ .source = source };

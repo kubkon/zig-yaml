@@ -26,8 +26,10 @@ const preamble =
     \\fn loadFromFile(file_path: []const u8) !Yaml {
     \\    const file = try std.fs.openFileAbsolute(file_path, .{});
     \\    defer file.close();
+    \\    var buf: [1024]u8 = undefined;
+    \\    var file_reader = file.reader(&buf);
     \\
-    \\    const source = try file.readToEndAlloc(alloc, std.math.maxInt(u32));
+    \\    const source = try file_reader.interface.allocRemaining(alloc, .unlimited);
     \\    defer alloc.free(source);
     \\
     \\    var yaml: Yaml = .{ .source = source };
@@ -124,21 +126,20 @@ fn make(step: *Step, make_options: Step.MakeOptions) !void {
         }
     }
 
-    var output = std.array_list.Managed(u8).init(arena);
-    const writer = output.writer();
+    var output = std.Io.Writer.Allocating.init(arena);
+    defer output.deinit();
+    const writer = &output.writer;
     try writer.writeAll(preamble);
 
     while (testcases.pop()) |kv| {
-        emitTest(arena, &output, kv.value) catch |err| switch (err) {
-            error.OutOfMemory => @panic("OOM"),
-            else => |e| return e,
-        };
+        try emitTest(writer, kv.value);
     }
 
     var man = b.graph.cache.obtain();
     defer man.deinit();
 
-    man.hash.addBytes(output.items);
+    const output_txt = try output.toOwnedSlice();
+    man.hash.addBytes(output_txt);
 
     if (try step.cacheHit(&man)) {
         const digest = man.final();
@@ -156,7 +157,7 @@ fn make(step: *Step, make_options: Step.MakeOptions) !void {
         return step.fail("unable to make path '{?s}{s}': {any}", .{ b.cache_root.path, sub_path_dirname, err });
     };
 
-    b.cache_root.handle.writeFile(.{ .sub_path = sub_path, .data = output.items }) catch |err| {
+    b.cache_root.handle.writeFile(.{ .sub_path = sub_path, .data = output_txt }) catch |err| {
         return step.fail("unable to write file: {}", .{err});
     };
     spec_test.output_file.path = try b.cache_root.join(b.allocator, &.{sub_path});
@@ -175,6 +176,8 @@ fn collectTest(arena: Allocator, entry: fs.Dir.Walker.Entry, testcases: *std.Str
     const remaining_path = try fs.path.join(arena, path_components.items);
     const result = try testcases.getOrPut(remaining_path);
 
+    var io_buffer: [256]u8 = undefined;
+
     if (!result.found_existing) {
         result.key_ptr.* = remaining_path;
 
@@ -190,7 +193,8 @@ fn collectTest(arena: Allocator, entry: fs.Dir.Walker.Entry, testcases: *std.Str
         });
         const name_file = try entry.dir.openFile(name_file_path, .{});
         defer name_file.close();
-        const name = try name_file.readToEndAlloc(arena, std.math.maxInt(u32));
+        var r = name_file.reader(&io_buffer);
+        const name = try r.interface.allocRemaining(arena, .unlimited);
 
         var tag_set = std.BufSet.init(arena);
         try tag_set.insert(first_path.name);
@@ -596,38 +600,34 @@ const expect_err_template =
     \\
 ;
 
-fn emitTest(arena: Allocator, output: *std.array_list.Managed(u8), testcase: Testcase) !void {
-    const head = try std.fmt.allocPrint(arena, "test \"{f}\" {{\n", .{
+fn emitTest(output: *std.Io.Writer, testcase: Testcase) !void {
+    try output.print("test \"{f}\" {{\n", .{
         std.zig.fmtString(testcase.name),
     });
-    try output.appendSlice(head);
 
     switch (testcase.result) {
         .skip => {
-            try output.appendSlice(skip_test_template);
+            try output.writeAll(skip_test_template);
         },
         .none => {
-            const body = try std.fmt.allocPrint(arena, no_output_template, .{
+            try output.print(no_output_template, .{
                 testcase.path,
             });
-            try output.appendSlice(body);
         },
         .expected_output_path => {
-            const body = try std.fmt.allocPrint(arena, expect_file_template, .{
+            try output.print(expect_file_template, .{
                 testcase.path,
                 testcase.result.expected_output_path,
             });
-            try output.appendSlice(body);
         },
         .error_expected => {
-            const body = try std.fmt.allocPrint(arena, expect_err_template, .{
+            try output.print(expect_err_template, .{
                 testcase.path,
             });
-            try output.appendSlice(body);
         },
     }
 
-    try output.appendSlice("}\n\n");
+    try output.writeAll("}\n\n");
 }
 
 fn canAccess(dir: fs.Dir, file_path: []const u8) bool {

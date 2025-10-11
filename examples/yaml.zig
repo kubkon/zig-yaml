@@ -91,8 +91,10 @@ pub fn main() !void {
 
     const file = try std.fs.cwd().openFile(file_path.?, .{});
     defer file.close();
+    var file_buf: [1024]u8 = undefined;
+    var file_reader = file.reader(&file_buf);
 
-    const source = try file.readToEndAlloc(allocator, std.math.maxInt(u32));
+    const source = try file_reader.interface.allocRemaining(allocator, .unlimited);
 
     var yaml: Yaml = .{ .source = source };
     defer yaml.deinit(allocator);
@@ -100,7 +102,7 @@ pub fn main() !void {
     yaml.load(allocator) catch |err| switch (err) {
         error.ParseFailure => {
             assert(yaml.parse_errors.errorMessageCount() > 0);
-            yaml.parse_errors.renderToStdErr(.{ .ttyconf = std.io.tty.detectConfig(stderr) });
+            yaml.parse_errors.renderToStdErr(.{ .ttyconf = std.Io.tty.detectConfig(stderr) });
             return error.ParseFailure;
         },
         else => return err,
