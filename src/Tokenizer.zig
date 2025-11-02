@@ -7,6 +7,7 @@ const testing = std.testing;
 buffer: []const u8,
 index: usize = 0,
 in_flow: usize = 0,
+block_scalar_indent: ?usize = null,
 
 pub const Token = struct {
     id: Id,
@@ -42,6 +43,8 @@ pub const Token = struct {
         single_quoted,   // '...'
         double_quoted,   // "..."
         literal,
+        block_literal,   // |
+        block_folded,    // >
         // zig fmt: on
     };
 
@@ -221,6 +224,16 @@ pub fn next(self: *Tokenizer) Token {
                 },
                 '"' => {
                     state = .double_quoted;
+                },
+                '|' => {
+                    result.id = .block_literal;
+                    self.index += 1;
+                    break;
+                },
+                '>' => {
+                    result.id = .block_folded;
+                    self.index += 1;
+                    break;
                 },
                 else => {
                     state = .literal;

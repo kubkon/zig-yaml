@@ -1,0 +1,40 @@
+# Block Scalar Demonstration
+
+# Literal style (|) - preserves line breaks
+poem: |
+  Roses are red,
+  Violets are blue,
+  YAML is great,
+  And so are you!
+
+# Folded style (>) - folds lines into spaces
+paragraph: >
+  This is a long paragraph that spans
+  multiple lines in the source file,
+  but will be folded into a single
+  line with spaces between words.
+
+# Practical use case - embedded JSON
+api_response: |
+  {
+    "status": "success",
+    "data": {
+      "user": "alice",
+      "id": 123
+    }
+  }
+
+# Practical use case - shell script  
+setup_script: |
+  #!/bin/bash
+  echo "Setting up environment..."
+  export PATH=$PATH:/usr/local/bin
+  echo "Done!"
+
+# Practical use case - SQL query
+database_query: |
+  SELECT users.name, orders.total
+  FROM users
+  INNER JOIN orders ON users.id = orders.user_id
+  WHERE orders.status = 'completed'
+  ORDER BY orders.total DESC;

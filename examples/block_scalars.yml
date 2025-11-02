@@ -1,0 +1,25 @@
+# Simple configuration using block scalars
+service: popshop
+version: "0.1.0"
+
+# Using a literal block scalar for multi-line text
+description: |
+  This is a multi-line description.
+  It preserves line breaks.
+  Each line is on its own line.
+
+# Using a folded block scalar
+summary: >
+  This text will be folded into a single line.
+  Line breaks become spaces.
+  Unless there are blank lines.
+
+# Simple values
+host: localhost
+port: 8080
+  
+# List of features
+features:
+  - fast
+  - reliable  
+  - scalable

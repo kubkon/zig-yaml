@@ -168,6 +168,11 @@ fn value(self: *Parser, gpa: Allocator) ParseError!Node.OptionalIndex {
             self.token_it.seekBy(-1);
             return self.listBracketed(gpa);
         },
+        .block_literal, .block_folded => {
+            // block scalar
+            self.token_it.seekBy(-1);
+            return self.blockScalar(gpa);
+        },
         else => return .none,
     }
 }
@@ -572,6 +577,197 @@ fn leafValue(self: *Parser, gpa: Allocator) ParseError!Node.OptionalIndex {
     }
 
     return error.MalformedYaml;
+}
+
+fn blockScalar(self: *Parser, gpa: Allocator) ParseError!Node.OptionalIndex {
+    const node_index: Node.Index = @enumFromInt(try self.nodes.addOne(gpa));
+    const node_start = self.token_it.pos;
+    
+    // Get the block indicator (| or >)
+    const indicator_tok = self.token_it.next() orelse return error.UnexpectedEof;
+    const is_literal = indicator_tok.id == .block_literal;
+    
+    log.debug("(block_scalar) begin {s}@{d}", .{ @tagName(indicator_tok.id), node_start });
+    
+    // The parent indentation is where the key was
+    // We need to find the indentation of the line containing the block indicator
+    // For simplicity, we'll track back to find the key's column
+    var parent_col: usize = 0;
+    if (@intFromEnum(node_start) > 0) {
+        var check_pos: usize = @intFromEnum(node_start);
+        while (check_pos > 0) {
+            check_pos -= 1;
+            const check_tok = self.tokens.items(.token)[check_pos];
+            if (check_tok.id == .new_line) {
+                // Found the previous line, now find first non-space token on current line
+                var line_pos = check_pos + 1;
+                while (line_pos < @intFromEnum(node_start)) : (line_pos += 1) {
+                    const line_tok = self.tokens.items(.token)[line_pos];
+                    if (line_tok.id != .space and line_tok.id != .tab) {
+                        parent_col = self.getCol(@enumFromInt(line_pos));
+                        break;
+                    }
+                }
+                break;
+            }
+        }
+    }
+    
+    log.debug("(block_scalar) parent_col = {d}", .{parent_col});
+    
+    // Skip optional chomping indicator and/or indentation indicator
+    // For simplicity, we'll just skip any literal that immediately follows
+    self.eatCommentsAndSpace(&.{ .new_line });
+    _ = self.eatToken(.literal, &.{ .new_line, .comment });
+    
+    // Expect newline after block indicator
+    self.eatCommentsAndSpace(&.{});
+    const next_tok = self.token_it.peek();
+    if (next_tok == null or next_tok.?.id != .new_line) {
+        // Must have a newline after block indicator
+        if (next_tok) |tok| {
+            log.debug("(block_scalar) expected newline but got {s}", .{@tagName(tok.id)});
+        }
+    }
+    _ = self.eatToken(.new_line, &.{});
+    
+    // Determine base indentation from first content line
+    var base_indent: ?u32 = null;
+    var content_start: ?Token.Index = null;
+    var content_end: Token.Index = node_start;
+    
+    // Collect all indented lines
+    while (self.token_it.peek()) |tok| {
+        switch (tok.id) {
+            .space, .tab => {
+                // Could be indentation - advance
+                content_end = self.token_it.pos;
+                _ = self.token_it.next();
+            },
+            .new_line => {
+                // Empty line or end of line - include it
+                content_end = self.token_it.pos;
+                _ = self.token_it.next();
+            },
+            .comment => {
+                // Comments at parent level or less end the block scalar
+                const comment_col = self.getCol(self.token_it.pos);
+                if (comment_col <= parent_col) {
+                    break;
+                }
+                // Otherwise include the comment in content
+                content_end = self.token_it.pos;
+                _ = self.token_it.next();
+            },
+            .doc_start, .doc_end, .eof => {
+                // Document markers end the block scalar
+                break;
+            },
+            else => {
+                // Any other token could be content
+                const line_col = self.getCol(self.token_it.pos);
+                
+                // First content line establishes the base indentation
+                if (base_indent == null) {
+                    base_indent = @intCast(line_col);
+                    content_start = self.token_it.pos;
+                    log.debug("(block_scalar) base_indent = {d}", .{base_indent.?});
+                }
+                
+                // If indentation is less than or equal to parent, we've reached the end
+                if (line_col <= parent_col) {
+                    log.debug("(block_scalar) ending: line_col={d} <= parent_col={d}", .{line_col, parent_col});
+                    break;
+                }
+                
+                content_end = self.token_it.pos;
+                _ = self.token_it.next();
+            },
+        }
+    }
+    
+    // If no content was found, return empty string
+    if (content_start == null) {
+        self.nodes.set(@intFromEnum(node_index), .{
+            .tag = .string_value,
+            .scope = .{
+                .start = node_start,
+                .end = content_end,
+            },
+            .data = .{ .string = .{ .index = @enumFromInt(0), .len = 0 } },
+        });
+        return node_index.toOptional();
+    }
+    
+    // Extract the raw text
+    const raw = self.rawString(content_start.?, content_end);
+    
+    // Process the content based on type
+    var result_bytes: std.ArrayListUnmanaged(u8) = .empty;
+    defer result_bytes.deinit(gpa);
+    
+    // Split into lines and process
+    var lines = std.mem.splitScalar(u8, raw, '\n');
+    var first_line = true;
+    
+    while (lines.next()) |line| {
+        // Strip base indentation
+        const stripped = if (base_indent) |bi| blk: {
+            var count: u32 = 0;
+            var i: usize = 0;
+            while (i < line.len and count < bi) : (i += 1) {
+                if (line[i] == ' ') {
+                    count += 1;
+                } else if (line[i] == '\t') {
+                    count += 1;
+                } else {
+                    break;
+                }
+            }
+            break :blk line[i..];
+        } else line;
+        
+        if (!first_line) {
+            if (is_literal) {
+                // Literal style: preserve line breaks
+                try result_bytes.append(gpa, '\n');
+            } else {
+                // Folded style: replace with space (simplified)
+                if (result_bytes.items.len > 0 and stripped.len > 0) {
+                    try result_bytes.append(gpa, ' ');
+                }
+            }
+        }
+        first_line = false;
+        
+        try result_bytes.appendSlice(gpa, stripped);
+    }
+    
+    // Add final newline for literal style
+    if (is_literal and result_bytes.items.len > 0) {
+        try result_bytes.append(gpa, '\n');
+    }
+    
+    // Store the string
+    const string_index: u32 = @intCast(self.string_bytes.items.len);
+    try self.string_bytes.appendSlice(gpa, result_bytes.items);
+    
+    const node_end = content_end;
+    log.debug("(block_scalar) end content: {s}", .{result_bytes.items});
+    
+    self.nodes.set(@intFromEnum(node_index), .{
+        .tag = .string_value,
+        .scope = .{
+            .start = node_start,
+            .end = node_end,
+        },
+        .data = .{ .string = .{ 
+            .index = @enumFromInt(string_index), 
+            .len = @intCast(result_bytes.items.len),
+        } },
+    });
+    
+    return node_index.toOptional();
 }
 
 fn eatCommentsAndSpace(self: *Parser, comptime exclusions: []const Token.Id) void {
