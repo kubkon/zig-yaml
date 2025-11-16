@@ -493,16 +493,16 @@ pub const Value = union(enum) {
                     const entry = tree.extraData(Tree.Map.Entry, extra_end);
                     extra_end = entry.end;
 
-                    const key = try gpa.dupe(u8, tree.rawString(entry.data.key, entry.data.key));
-                    errdefer gpa.free(key);
+                    const raw_key = tree.rawString(entry.data.key, entry.data.key);
+                    if (out_map.get(raw_key)) |_| return error.DuplicateMapKey;
 
-                    const gop = out_map.getOrPutAssumeCapacity(key);
-                    if (gop.found_existing) return error.DuplicateMapKey;
-
-                    gop.value_ptr.* = if (entry.data.maybe_node.unwrap()) |value|
+                    const value = if (entry.data.maybe_node.unwrap()) |value|
                         try Value.fromNode(gpa, tree, value)
                     else
                         .empty;
+
+                    const key = try gpa.dupe(u8, raw_key);
+                    out_map.putAssumeCapacity(key, value);
                 }
 
                 return Value{ .map = out_map };
