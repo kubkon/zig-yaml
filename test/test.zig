@@ -6,13 +6,21 @@ const Allocator = mem.Allocator;
 const Arena = std.heap.ArenaAllocator;
 const Yaml = @import("yaml").Yaml;
 
+const io = std.testing.io;
 const gpa = testing.allocator;
 
 fn loadFromFile(file_path: []const u8) !Yaml {
     const file = try std.fs.cwd().openFile(file_path, .{});
     defer file.close();
 
-    const source = try file.readToEndAlloc(gpa, std.math.maxInt(u32));
+    var r_buf: [1024]u8 = undefined;
+    var r = file.reader(io, &r_buf);
+
+    var out: std.ArrayList(u8) = .{};
+    defer out.deinit(gpa);
+
+    try std.Io.Reader.appendRemainingUnlimited(&r.interface, gpa, &out);
+    const source = try out.toOwnedSlice(gpa);
     defer gpa.free(source);
 
     var yaml: Yaml = .{ .source = source };

@@ -59,6 +59,11 @@ pub fn main() !void {
     defer arena.deinit();
     const allocator = arena.allocator();
 
+    var threaded: std.Io.Threaded = .init(allocator);
+    defer threaded.deinit();
+
+    const io = threaded.io();
+
     const all_args = try std.process.argsAlloc(allocator);
     const args = all_args[1..];
 
@@ -92,7 +97,15 @@ pub fn main() !void {
     const file = try std.fs.cwd().openFile(file_path.?, .{});
     defer file.close();
 
-    const source = try file.readToEndAlloc(allocator, std.math.maxInt(u32));
+    var r_buf: [1024]u8 = undefined;
+    var r = file.reader(io, &r_buf);
+
+    var out: std.ArrayList(u8) = .{};
+    defer out.deinit(allocator);
+
+    try std.Io.Reader.appendRemainingUnlimited(&r.interface, allocator, &out);
+
+    const source = try out.toOwnedSlice(allocator);
 
     var yaml: Yaml = .{ .source = source };
     defer yaml.deinit(allocator);
@@ -100,7 +113,7 @@ pub fn main() !void {
     yaml.load(allocator) catch |err| switch (err) {
         error.ParseFailure => {
             assert(yaml.parse_errors.errorMessageCount() > 0);
-            yaml.parse_errors.renderToStdErr(.{ .ttyconf = std.io.tty.detectConfig(stderr) });
+            yaml.parse_errors.renderToStdErr(.{}, .auto);
             return error.ParseFailure;
         },
         else => return err,
