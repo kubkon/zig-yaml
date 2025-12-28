@@ -1,6 +1,7 @@
 const std = @import("std");
 const fs = std.fs;
 const mem = std.mem;
+const Io = std.Io;
 
 const Allocator = mem.Allocator;
 const Step = std.Build.Step;
@@ -8,6 +9,7 @@ const SpecTest = @This();
 
 pub const base_id: Step.Id = .custom;
 
+io: Io,
 step: Step,
 output_file: std.Build.GeneratedFile,
 
@@ -50,6 +52,7 @@ pub fn create(owner: *std.Build) *SpecTest {
     const spec_test = owner.allocator.create(SpecTest) catch @panic("OOM");
 
     spec_test.* = .{
+        .io = owner.graph.io,
         .step = Step.init(.{ .id = base_id, .name = "yaml-test-generate", .owner = owner, .makeFn = make }),
         .output_file = std.Build.GeneratedFile{ .step = &spec_test.step },
     };
@@ -78,8 +81,8 @@ fn make(step: *Step, make_options: Step.MakeOptions) !void {
     const spec_test: *SpecTest = @fieldParentPtr("step", step);
     const b = step.owner;
 
-    const cwd = std.fs.cwd();
-    cwd.access("test/yaml-test-suite/tags", .{}) catch {
+    const cwd = Io.Dir.cwd();
+    cwd.access(b.graph.io, "test/yaml-test-suite/tags", .{}) catch {
         return spec_test.step.fail("Testfiles not found, make sure you have loaded the submodule.", .{});
     };
     if (b.graph.host.result.os.tag == .windows) {
@@ -97,9 +100,9 @@ fn make(step: *Step, make_options: Step.MakeOptions) !void {
         "test/yaml-test-suite",
     });
 
-    const root_data_dir = try std.fs.openDirAbsolute(root_data_path, .{});
+    const root_data_dir = try Io.Dir.openDirAbsolute(b.graph.io, root_data_path, .{});
 
-    var itdir = try root_data_dir.openDir("tags", .{
+    var itdir = try root_data_dir.openDir(b.graph.io, "tags", .{
         .iterate = true,
         .access_sub_paths = true,
     });
@@ -108,10 +111,10 @@ fn make(step: *Step, make_options: Step.MakeOptions) !void {
     defer walker.deinit();
 
     loop: {
-        while (walker.next()) |maybe_entry| {
+        while (walker.next(b.graph.io)) |maybe_entry| {
             if (maybe_entry) |entry| {
                 if (entry.kind != .sym_link) continue;
-                collectTest(arena, entry, &testcases) catch |err| switch (err) {
+                collectTest(b.graph.io, arena, entry, &testcases) catch |err| switch (err) {
                     error.OutOfMemory => @panic("OOM"),
                     else => |e| return e,
                 };
@@ -153,18 +156,18 @@ fn make(step: *Step, make_options: Step.MakeOptions) !void {
     const sub_path = b.pathJoin(&.{ &digest, test_filename });
     const sub_path_dirname = fs.path.dirname(sub_path).?;
 
-    b.cache_root.handle.makePath(sub_path_dirname) catch |err| {
+    b.cache_root.handle.createDirPath(b.graph.io, sub_path_dirname) catch |err| {
         return step.fail("unable to make path '{?s}{s}': {any}", .{ b.cache_root.path, sub_path_dirname, err });
     };
 
-    b.cache_root.handle.writeFile(.{ .sub_path = sub_path, .data = try output.toOwnedSlice() }) catch |err| {
+    b.cache_root.handle.writeFile(b.graph.io, .{ .sub_path = sub_path, .data = try output.toOwnedSlice() }) catch |err| {
         return step.fail("unable to write file: {}", .{err});
     };
     spec_test.output_file.path = try b.cache_root.join(b.allocator, &.{sub_path});
     try man.writeManifest();
 }
 
-fn collectTest(arena: Allocator, entry: fs.Dir.Walker.Entry, testcases: *std.StringArrayHashMap(Testcase)) !void {
+fn collectTest(io: Io, arena: Allocator, entry: Io.Dir.Walker.Entry, testcases: *std.StringArrayHashMap(Testcase)) !void {
     var path_components_it = std.fs.path.componentIterator(entry.path);
     const first_path = path_components_it.first().?;
 
@@ -183,17 +186,17 @@ fn collectTest(arena: Allocator, entry: fs.Dir.Walker.Entry, testcases: *std.Str
             entry.basename,
             "in.yaml",
         });
-        const real_in_path = try entry.dir.realpathAlloc(arena, in_path);
+        const real_in_path = try entry.dir.realPathFileAlloc(io, in_path, arena);
 
         const name_file_path = try fs.path.join(arena, &[_][]const u8{
             entry.basename,
             "===",
         });
-        const name_file = try entry.dir.openFile(name_file_path, .{});
-        defer name_file.close();
+        const name_file = try entry.dir.openFile(io, name_file_path, .{});
+        defer name_file.close(io);
 
         var r_buf: [1024]u8 = undefined;
-        var r = name_file.reader(std.testing.io, &r_buf);
+        var r = name_file.reader(io, &r_buf);
 
         var out: std.ArrayList(u8) = .{};
         defer out.deinit(arena);
@@ -230,10 +233,10 @@ fn collectTest(arena: Allocator, entry: fs.Dir.Walker.Entry, testcases: *std.Str
             "error",
         });
 
-        if (canAccess(entry.dir, out_path)) {
-            const real_out_path = try entry.dir.realpathAlloc(arena, out_path);
+        if (canAccess(io, entry.dir, out_path)) {
+            const real_out_path = try entry.dir.realPathFileAlloc(io, out_path, arena);
             result.value_ptr.result = .{ .expected_output_path = real_out_path };
-        } else if (canAccess(entry.dir, err_path)) {
+        } else if (canAccess(io, entry.dir, err_path)) {
             result.value_ptr.result = .{ .error_expected = {} };
         }
     } else {
@@ -640,8 +643,8 @@ fn emitTest(arena: Allocator, output: *std.Io.Writer, testcase: Testcase) !void 
     try output.flush();
 }
 
-fn canAccess(dir: fs.Dir, file_path: []const u8) bool {
-    if (dir.access(file_path, .{})) {
+fn canAccess(io: Io, dir: Io.Dir, file_path: []const u8) bool {
+    if (dir.access(io, file_path, .{})) {
         return true;
     } else |_| {
         return false;

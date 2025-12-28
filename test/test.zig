@@ -10,8 +10,8 @@ const io = std.testing.io;
 const gpa = testing.allocator;
 
 fn loadFromFile(file_path: []const u8) !Yaml {
-    const file = try std.fs.cwd().openFile(file_path, .{});
-    defer file.close();
+    const file = try std.Io.Dir.cwd().openFile(io, file_path, .{});
+    defer file.close(io);
 
     var r_buf: [1024]u8 = undefined;
     var r = file.reader(io, &r_buf);
