@@ -19,7 +19,7 @@ jobs:
         submodules: true
     - uses: mlugg/setup-zig@v2
       with:
-        version: master
+        version: 0.15.2
     - run: zig fmt --check src 
     - run: zig build test
     - run: zig build run -- examples/lists.yml
@@ -38,5 +38,5 @@ jobs:
           submodules: true
       - uses: mlugg/setup-zig@v2
         with:
-          version: master
+          version: 0.15.2
       - run: zig build test -Denable-spec-tests

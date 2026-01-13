@@ -5,7 +5,7 @@
     nixpkgs.url = "github:nixos/nixpkgs/nixos-24.11";
     flake-utils.url = "github:numtide/flake-utils";
     zig.url = "github:mitchellh/zig-overlay";
-    zls.url = "github:zigtools/zls";
+    zls.url = "github:zigtools/zls/f91b2e1e305e5d5bd3725aea90f9f9bfb3dce055";
     poop.url = "github:kubkon/poop/nix";
 
     # Used for shell.nix
@@ -30,7 +30,7 @@
       system:
       let
         pkgs = nixpkgs.legacyPackages.${system};
-        zig = inputs.zig.packages.${system}.master;
+        zig = inputs.zig.packages.${system}."0.15.2";
         zls = inputs.zls.packages.${system}.default.overrideAttrs (old: {
           nativeBuildInputs = [ zig ];
         });
@@ -46,7 +46,8 @@
           buildInputs = [
             zig
             zls
-          ] ++ linuxSpecific;
+          ]
+          ++ linuxSpecific;
         };
 
         # For compatibility with older versions of the `nix` binary
