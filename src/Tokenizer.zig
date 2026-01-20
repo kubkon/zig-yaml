@@ -285,7 +285,7 @@ pub fn next(self: *Tokenizer) Token {
             },
 
             .literal => switch (c) {
-                '\r', '\n', ' ', '\'', '"', ']', '}' => {
+                '\r', '\n', ' ', ']', '}' => {
                     result.id = .literal;
                     break;
                 },
