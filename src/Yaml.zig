@@ -89,7 +89,7 @@ pub fn parse(self: Yaml, arena: Allocator, comptime T: type) Error!T {
     }
 }
 
-fn parseValue(self: Yaml, arena: Allocator, comptime T: type, value: Value) Error!T {
+pub fn parseValue(self: Yaml, arena: Allocator, comptime T: type, value: Value) Error!T {
     return switch (@typeInfo(T)) {
         .int => self.parseInt(T, value),
         .bool => self.parseBoolean(bool, value),
@@ -115,19 +115,19 @@ fn parseValue(self: Yaml, arena: Allocator, comptime T: type, value: Value) Erro
     };
 }
 
-fn parseInt(self: Yaml, comptime T: type, value: Value) Error!T {
+pub fn parseInt(self: Yaml, comptime T: type, value: Value) Error!T {
     _ = self;
     const scalar = value.asScalar() orelse return error.TypeMismatch;
     return try std.fmt.parseInt(T, scalar, 0);
 }
 
-fn parseFloat(self: Yaml, comptime T: type, value: Value) Error!T {
+pub fn parseFloat(self: Yaml, comptime T: type, value: Value) Error!T {
     _ = self;
     const scalar = value.asScalar() orelse return error.TypeMismatch;
     return try std.fmt.parseFloat(T, scalar);
 }
 
-fn parseBoolean(self: Yaml, comptime T: type, value: Value) Error!T {
+pub fn parseBoolean(self: Yaml, comptime T: type, value: Value) Error!T {
     _ = self;
     const raw = value.asScalar() orelse return error.TypeMismatch;
 
@@ -151,8 +151,12 @@ fn parseBoolean(self: Yaml, comptime T: type, value: Value) Error!T {
     return error.TypeMismatch;
 }
 
-fn parseUnion(self: Yaml, arena: Allocator, comptime T: type, value: Value) Error!T {
+pub fn parseUnion(self: Yaml, arena: Allocator, comptime T: type, value: Value) Error!T {
     const union_info = @typeInfo(T).@"union";
+
+    if (@hasDecl(T, "parseYaml")) {
+        return T.parseYaml(self, arena, value);
+    }
 
     if (union_info.tag_type) |_| {
         inline for (union_info.fields) |field| {
@@ -170,15 +174,19 @@ fn parseUnion(self: Yaml, arena: Allocator, comptime T: type, value: Value) Erro
     return error.UnionTagMissing;
 }
 
-fn parseOptional(self: Yaml, arena: Allocator, comptime T: type, value: ?Value) Error!T {
+pub fn parseOptional(self: Yaml, arena: Allocator, comptime T: type, value: ?Value) Error!T {
     const unwrapped = value orelse return null;
     const opt_info = @typeInfo(T).optional;
     return @as(T, try self.parseValue(arena, opt_info.child, unwrapped));
 }
 
-fn parseStruct(self: Yaml, arena: Allocator, comptime T: type, map: Map) Error!T {
+pub fn parseStruct(self: Yaml, arena: Allocator, comptime T: type, map: Map) Error!T {
     const struct_info = @typeInfo(T).@"struct";
     var parsed: T = undefined;
+
+    if (@hasDecl(T, "parseYaml")) {
+        return T.parseYaml(self, arena, .{ .map = map });
+    }
 
     inline for (struct_info.fields) |field| {
         var value: ?Value = map.get(field.name) orelse blk: {
@@ -211,7 +219,7 @@ fn parseStruct(self: Yaml, arena: Allocator, comptime T: type, map: Map) Error!T
     return parsed;
 }
 
-fn parsePointer(self: Yaml, arena: Allocator, comptime T: type, value: Value) Error!T {
+pub fn parsePointer(self: Yaml, arena: Allocator, comptime T: type, value: Value) Error!T {
     const ptr_info = @typeInfo(T).pointer;
 
     switch (ptr_info.size) {
@@ -240,7 +248,7 @@ fn parsePointer(self: Yaml, arena: Allocator, comptime T: type, value: Value) Er
     }
 }
 
-fn parseArray(self: Yaml, arena: Allocator, comptime T: type, list: List) Error!T {
+pub fn parseArray(self: Yaml, arena: Allocator, comptime T: type, list: List) Error!T {
     const array_info = @typeInfo(T).array;
     if (array_info.len != list.len) return error.ArraySizeMismatch;
 

@@ -122,6 +122,39 @@ nested:
 finally: [ 8.17, 19.78, 17, 21  ]
 ```
 
+4. For parsing types not supported, add a `parseYaml` function:
+
+```zig
+const Simple = struct {
+    names: []const []const u8,
+    numbers: []const i16,
+    nested: struct {
+        some: []const u8,
+        wick: []const u8,
+    },
+    tagged: union(enum) {
+        pub fn parseYaml(yaml: Yaml, arena: std.mem.Allocator, value: Yaml.Value) Yaml.Error!@This() {
+            const map = try value.asMap();
+
+            inline for (@typeInfo(@This()).@"union".fields) |field| {
+                if (map.get(field.name)) |entry| {
+                    return @unionInit(@This(), field.name, try yaml.parseValue(arena, field.type, entry));
+                }
+            }
+
+            return error.TypeMismatch;
+        }
+    },
+    finally: [4]f16,
+};
+
+var arena = std.heap.ArenaAllocator.init(gpa);
+defer arena.deinit();
+
+const simple = try yaml.parse(arena.allocator(), Simple);
+try std.testing.expectEqual(simple.names.len, 3);
+```
+
 ### Error handling
 
 The library currently reports user-friendly, more informative parsing errors only which are stored out-of-band.
