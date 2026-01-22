@@ -276,6 +276,24 @@ test "simple map untyped" {
     try testing.expectEqualStrings("0", map.get("a").?.scalar);
 }
 
+test "flow map untyped" {
+    const source =
+        \\{a: 0, b: 1}
+    ;
+
+    var yaml: Yaml = .{ .source = source };
+    defer yaml.deinit(testing.allocator);
+    try yaml.load(testing.allocator);
+
+    try testing.expectEqual(yaml.docs.items.len, 1);
+
+    const map = yaml.docs.items[0].map;
+    try testing.expect(map.contains("a"));
+    try testing.expect(map.contains("b"));
+    try testing.expectEqual(@as(i64, 0), map.get("a").?.int);
+    try testing.expectEqual(@as(i64, 1), map.get("b").?.int);
+}
+
 test "simple map untyped with a list of maps" {
     const source =
         \\a: 0
