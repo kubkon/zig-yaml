@@ -168,6 +168,10 @@ fn value(self: *Parser, gpa: Allocator) ParseError!Node.OptionalIndex {
             self.token_it.seekBy(-1);
             return self.listBracketed(gpa);
         },
+        .eof => {
+            self.token_it.seekTo(pos);
+            return .none;
+        },
         else => return .none,
     }
 }
