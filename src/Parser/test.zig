@@ -878,6 +878,13 @@ test "empty map" {
     );
 }
 
+test "empty map value at eof" {
+    try parseSuccess(
+        \\key:
+        \\
+    );
+}
+
 test "comment within a bracketed list is an error" {
     try parseError(
         \\[ # something
