@@ -377,7 +377,7 @@ test "empty doc with explicit markers and a directive" {
 test "sequence of values" {
     try testExpected(
         \\- 0
-        \\- 1
+        \\- 1 
         \\- 2
     , &[_]Token.Id{
         .seq_item_ind,
@@ -385,6 +385,7 @@ test "sequence of values" {
         .new_line,
         .seq_item_ind,
         .literal,
+        .space,
         .new_line,
         .seq_item_ind,
         .literal,
@@ -421,12 +422,19 @@ test "sequence of sequences" {
 test "mappings" {
     try testExpected(
         \\key1: value1
-        \\key2: value2
+        \\key2: value2 
+        \\key3: value3
     , &[_]Token.Id{
         .literal,
         .map_value_ind,
         .space,
         .literal,
+        .new_line,
+        .literal,
+        .map_value_ind,
+        .space,
+        .literal,
+        .space,
         .new_line,
         .literal,
         .map_value_ind,
@@ -573,7 +581,10 @@ test "comments" {
         \\- val1
         \\# second value
         \\- val2
+        \\key1: 1 # this is comment # and comment continue
+        \\key2: 2# this is not comment
     , &[_]Token.Id{
+        // key
         .literal,
         .map_value_ind,
         .space,
@@ -587,6 +598,28 @@ test "comments" {
         .comment,
         .new_line,
         .seq_item_ind,
+        .literal,
+        .new_line,
+        // key1
+        .literal,
+        .map_value_ind,
+        .space,
+        .literal,
+        .space,
+        .comment,
+        .new_line,
+        // key 2
+        .literal,
+        .map_value_ind,
+        .space,
+        .literal,
+        .space,
+        .literal,
+        .space,
+        .literal,
+        .space,
+        .literal,
+        .space,
         .literal,
         .eof,
     });

@@ -146,6 +146,60 @@ test "leaf in quotes" {
     try expectStringValueMapEntry(tree, entry_data.data, "key3", "double quoted");
 }
 
+test "white space after value" {
+//     testing.log_level = .debug;
+    const source =
+        \\key0: 0 
+        \\key1: 1 1
+        \\key2: 2 # with comment
+        \\key3: 3#this is not comment
+    ;
+
+    var parser = try Parser.init(testing.allocator, source);
+    defer parser.deinit(testing.allocator);
+    parser.parse(testing.allocator) catch |err| {
+        var bundle = try parser.errors.toOwnedBundle("");
+        defer bundle.deinit(testing.allocator);
+        var buf: std.Io.Writer.Allocating = .init(testing.allocator);
+        defer buf.deinit();
+        try bundle.renderToWriter(.{}, &buf.writer);
+        std.debug.print("detail: {s}", .{buf.written()});
+        return err;
+    };
+    var tree = try parser.toOwnedTree(testing.allocator);
+    defer tree.deinit(testing.allocator);
+
+    try testing.expectEqual(1, tree.docs.len);
+
+    const doc = tree.docs[0];
+    try testing.expectEqual(.doc, tree.nodeTag(doc));
+
+    try expectNodeScope(tree, doc, 0, tree.tokens.len - 2);
+
+    const doc_value = tree.nodeData(doc).maybe_node;
+    try testing.expect(doc_value != .none);
+    try testing.expectEqual(.map_many, tree.nodeTag(doc_value.unwrap().?));
+
+    const map = doc_value.unwrap().?;
+
+    try expectNodeScope(tree, map, 0, tree.tokens.len - 2);
+
+    const map_data = tree.extraData(Map, tree.nodeData(map).extra);
+    try testing.expectEqual(4, map_data.data.map_len);
+
+    var entry_data = tree.extraData(Map.Entry, map_data.end);
+    try expectValueMapEntry(tree, entry_data.data, "key0", "0");
+
+    entry_data = tree.extraData(Map.Entry, entry_data.end);
+    try expectValueMapEntry(tree, entry_data.data, "key1", "1 1");
+
+    entry_data = tree.extraData(Map.Entry, entry_data.end);
+    try expectValueMapEntry(tree, entry_data.data, "key2", "2");
+
+    entry_data = tree.extraData(Map.Entry, entry_data.end);
+    try expectValueMapEntry(tree, entry_data.data, "key3", "3#this is not comment");
+}
+
 test "nested maps" {
     const source =
         \\key1:

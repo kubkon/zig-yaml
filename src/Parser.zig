@@ -537,7 +537,7 @@ fn leafValue(self: *Parser, gpa: Allocator) ParseError!Node.OptionalIndex {
             .literal => {},
             .space => {
                 const trailing = @intFromEnum(self.token_it.pos) - 2;
-                self.eatCommentsAndSpace(&.{});
+                self.eatCommentsAndSpace(&.{.comment, .new_line});
                 if (self.token_it.peek()) |peek| {
                     if (peek.id != .literal) {
                         const node_end: Token.Index = @enumFromInt(trailing);
