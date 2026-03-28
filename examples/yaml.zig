@@ -5,8 +5,8 @@ const Yaml = @import("yaml").Yaml;
 
 const mem = std.mem;
 
-var gpa_alloc = std.heap.GeneralPurposeAllocator(.{}){};
-const gpa = gpa_alloc.allocator();
+var debug_allocator = std.heap.DebugAllocator(.{}).init;
+const gpa = debug_allocator.allocator();
 
 const usage =
     \\Usage: yaml <path-to-yaml>
