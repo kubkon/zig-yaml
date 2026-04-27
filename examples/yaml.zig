@@ -5,9 +5,6 @@ const Yaml = @import("yaml").Yaml;
 
 const mem = std.mem;
 
-var gpa_alloc = std.heap.GeneralPurposeAllocator(.{}){};
-const gpa = gpa_alloc.allocator();
-
 const usage =
     \\Usage: yaml <path-to-yaml>
     \\
@@ -55,19 +52,18 @@ fn logFn(
 
 pub const std_options: std.Options = .{ .logFn = logFn };
 
-pub fn main(init: std.process.Init.Minimal) !void {
-    var arena_alloc = std.heap.ArenaAllocator.init(gpa);
-    defer arena_alloc.deinit();
-    const arena = arena_alloc.allocator();
+pub fn main(init: std.process.Init) !void {
+    const gpa = init.gpa;
+    const arena = init.arena.allocator();
 
     var threaded: std.Io.Threaded = .init(gpa, .{
-        .argv0 = .init(init.args),
-        .environ = init.environ,
+        .argv0 = .init(init.minimal.args),
+        .environ = init.minimal.environ,
     });
     defer threaded.deinit();
     const io = threaded.io();
 
-    const all_args = try init.args.toSlice(arena);
+    const all_args = try init.minimal.args.toSlice(arena);
     const args = all_args[1..];
 
     var stdout_buffer: [1024]u8 = undefined;

@@ -97,7 +97,7 @@ fn make(step: *Step, make_options: Step.MakeOptions) !void {
     defer arena_allocator.deinit();
     const arena = arena_allocator.allocator();
 
-    var testcases = std.StringArrayHashMap(Testcase).init(arena);
+    var testcases: std.StringArrayHashMapUnmanaged(Testcase) = .empty;
 
     const root_data_path = try fs.path.join(arena, &[_][]const u8{
         b.build_root.path.?,
@@ -168,7 +168,7 @@ fn make(step: *Step, make_options: Step.MakeOptions) !void {
     try man.writeManifest();
 }
 
-fn collectTest(io: std.Io, arena: Allocator, entry: std.Io.Dir.Walker.Entry, testcases: *std.StringArrayHashMap(Testcase)) !void {
+fn collectTest(io: std.Io, arena: Allocator, entry: std.Io.Dir.Walker.Entry, testcases: *std.StringArrayHashMapUnmanaged(Testcase)) !void {
     var path_components_it = std.fs.path.componentIterator(entry.path);
     const first_path = path_components_it.first().?;
 
@@ -178,7 +178,7 @@ fn collectTest(io: std.Io, arena: Allocator, entry: std.Io.Dir.Walker.Entry, tes
     }
 
     const remaining_path = try fs.path.join(arena, path_components.items);
-    const result = try testcases.getOrPut(remaining_path);
+    const result = try testcases.getOrPut(arena, remaining_path);
 
     var buffer: [256]u8 = undefined;
 
