@@ -1,8 +1,8 @@
 .{
     .name = .zig_yaml,
-    .version = "0.2.0",
+    .version = "0.3.0",
     .fingerprint = 0x225b4a67d67a5d0b, // Changing this has security and trust implications.
-    .minimum_zig_version = "0.15.1",
+    .minimum_zig_version = "0.16.0",
     .paths = .{
         "src",
         "test",

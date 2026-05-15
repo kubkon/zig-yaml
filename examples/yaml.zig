@@ -5,7 +5,8 @@ const Yaml = @import("yaml").Yaml;
 
 const mem = std.mem;
 
-var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+var gpa_alloc = std.heap.GeneralPurposeAllocator(.{}){};
+const gpa = gpa_alloc.allocator();
 
 const usage =
     \\Usage: yaml <path-to-yaml>
@@ -16,7 +17,7 @@ const usage =
     \\
 ;
 
-var log_scopes: std.ArrayList([]const u8) = std.ArrayList([]const u8).init(gpa.allocator());
+var log_scopes: std.ArrayList([]const u8) = .empty;
 
 fn logFn(
     comptime level: std.log.Level,
@@ -54,31 +55,40 @@ fn logFn(
 
 pub const std_options: std.Options = .{ .logFn = logFn };
 
-pub fn main() !void {
-    var arena = std.heap.ArenaAllocator.init(gpa.allocator());
-    defer arena.deinit();
-    const allocator = arena.allocator();
+pub fn main(init: std.process.Init.Minimal) !void {
+    var arena_alloc = std.heap.ArenaAllocator.init(gpa);
+    defer arena_alloc.deinit();
+    const arena = arena_alloc.allocator();
 
-    const all_args = try std.process.argsAlloc(allocator);
+    var threaded: std.Io.Threaded = .init(gpa, .{
+        .argv0 = .init(init.args),
+        .environ = init.environ,
+    });
+    defer threaded.deinit();
+    const io = threaded.io();
+
+    const all_args = try init.args.toSlice(arena);
     const args = all_args[1..];
 
-    const stdout = std.fs.File.stdout();
-    const stderr = std.fs.File.stderr();
+    var stdout_buffer: [1024]u8 = undefined;
+    var stdout = std.Io.File.stdout().writer(io, &stdout_buffer);
+    var stderr_buffer: [1024]u8 = undefined;
+    var stderr = std.Io.File.stderr().writer(io, &stderr_buffer);
 
     var file_path: ?[]const u8 = null;
     var arg_index: usize = 0;
     while (arg_index < args.len) : (arg_index += 1) {
         if (mem.eql(u8, "-h", args[arg_index]) or mem.eql(u8, "--help", args[arg_index])) {
-            return stdout.writeAll(usage);
+            return stdout.interface.writeAll(usage);
         } else if (mem.eql(u8, "--debug-log", args[arg_index])) {
             if (arg_index + 1 >= args.len) {
-                return stderr.writeAll("fatal: expected [scope] after --debug-log\n\n");
+                return stderr.interface.writeAll("fatal: expected [scope] after --debug-log\n\n");
             }
             arg_index += 1;
             if (!build_options.enable_logging) {
-                try stderr.writeAll("warn: --debug-log will have no effect as program was not built with -Dlog\n\n");
+                try stderr.interface.writeAll("warn: --debug-log will have no effect as program was not built with -Dlog\n\n");
             } else {
-                try log_scopes.append(args[arg_index]);
+                try log_scopes.append(gpa, args[arg_index]);
             }
         } else {
             file_path = args[arg_index];
@@ -86,26 +96,28 @@ pub fn main() !void {
     }
 
     if (file_path == null) {
-        return stderr.writeAll("fatal: no input path to yaml file specified\n\n");
+        return stderr.interface.writeAll("fatal: no input path to yaml file specified\n\n");
     }
 
-    const file = try std.fs.cwd().openFile(file_path.?, .{});
-    defer file.close();
+    const file = try std.Io.Dir.cwd().openFile(io, file_path.?, .{});
+    defer file.close(io);
 
-    const source = try file.readToEndAlloc(allocator, std.math.maxInt(u32));
+    var file_buffer: [1024]u8 = undefined;
+    var file_reader = file.reader(io, &file_buffer);
+
+    const source = try file_reader.interface.allocRemaining(arena, .unlimited);
 
     var yaml: Yaml = .{ .source = source };
-    defer yaml.deinit(allocator);
+    defer yaml.deinit(arena);
 
-    yaml.load(allocator) catch |err| switch (err) {
+    yaml.load(arena) catch |err| switch (err) {
         error.ParseFailure => {
             assert(yaml.parse_errors.errorMessageCount() > 0);
-            yaml.parse_errors.renderToStdErr(.{ .ttyconf = std.io.tty.detectConfig(stderr) });
+            yaml.parse_errors.renderToStderr(io, .{}, .auto) catch {};
             return error.ParseFailure;
         },
         else => return err,
     };
 
-    var writer = stdout.writer(&[0]u8{});
-    try yaml.stringify(&writer.interface);
+    try yaml.stringify(&stdout.interface);
 }

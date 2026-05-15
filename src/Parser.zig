@@ -772,11 +772,11 @@ fn getLineInfo(source: []const u8, line_col: LineCol) struct {
     };
 
     const span_start: u32 = span_start: {
-        const trimmed = mem.trimLeft(u8, line, " ");
+        const trimmed = mem.trimStart(u8, line, " ");
         break :span_start @intCast(mem.indexOf(u8, line, trimmed).?);
     };
 
-    const span_end: u32 = @intCast(mem.trimRight(u8, line, " \r\n").len);
+    const span_end: u32 = @intCast(mem.trimEnd(u8, line, " \r\n").len);
 
     return .{
         .line = line,
