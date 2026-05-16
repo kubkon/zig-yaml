@@ -425,7 +425,7 @@ fn listBracketed(self: *Parser, gpa: Allocator) ParseError!Node.OptionalIndex {
         try values.append(gpa, .{ .node = value_index.unwrap().? });
     };
 
-    if (self.eatToken(.comment, &.{.comment})) |pos| {
+    if (self.eatToken(.comment, &.{ .comment, .new_line, .space })) |pos| {
         return self.fail(gpa, pos, "comments must be separated from other tokens by white space characters", .{});
     }
 
