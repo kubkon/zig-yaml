@@ -21,10 +21,10 @@ const Yaml = @import("Yaml.zig");
 source: []const u8,
 tokens: std.MultiArrayList(TokenWithLineCol) = .empty,
 token_it: TokenIterator = undefined,
-docs: std.ArrayListUnmanaged(Node.Index) = .empty,
+docs: std.ArrayList(Node.Index) = .empty,
 nodes: std.MultiArrayList(Node) = .empty,
-extra: std.ArrayListUnmanaged(u32) = .empty,
-string_bytes: std.ArrayListUnmanaged(u8) = .empty,
+extra: std.ArrayList(u32) = .empty,
+string_bytes: std.ArrayList(u8) = .empty,
 errors: ErrorBundle.Wip,
 
 pub fn init(gpa: Allocator, source: []const u8) Allocator.Error!Parser {
@@ -117,20 +117,19 @@ fn addExtra(self: *Parser, gpa: Allocator, extra: anytype) Allocator.Error!u32 {
 
 fn addExtraAssumeCapacity(self: *Parser, extra: anytype) u32 {
     const result: u32 = @intCast(self.extra.items.len);
-    self.extra.appendSliceAssumeCapacity(&payloadToExtraItems(extra));
-    return result;
-}
-
-fn payloadToExtraItems(data: anytype) [@typeInfo(@TypeOf(data)).@"struct".fields.len]u32 {
-    const fields = @typeInfo(@TypeOf(data)).@"struct".fields;
-    var result: [fields.len]u32 = undefined;
-    inline for (&result, fields) |*val, field| {
-        val.* = switch (field.type) {
-            u32 => @field(data, field.name),
-            i32 => @bitCast(@field(data, field.name)),
-            Node.Index, Node.OptionalIndex, Token.Index => @intFromEnum(@field(data, field.name)),
-            else => @compileError("bad field type: " ++ @typeName(field.type)),
-        };
+    const T = @TypeOf(extra);
+    const type_info = @typeInfo(T);
+    if (type_info == .@"struct") {
+        const struct_info = type_info.@"struct";
+        inline for (struct_info.field_names, struct_info.field_types) |field_name, field_type| {
+            const val = switch (field_type) {
+                u32 => @field(extra, field_name),
+                i32 => @as(i32, @bitCast(@as(u32, @field(extra, field_name)))),
+                Node.Index, Node.OptionalIndex, Token.Index => @intFromEnum(@field(extra, field_name)),
+                else => @compileError("bad field type: " ++ @typeName(field_type)),
+            };
+            self.extra.appendAssumeCapacity(val);
+        }
     }
     return result;
 }
@@ -253,7 +252,7 @@ fn map(self: *Parser, gpa: Allocator) ParseError!Node.OptionalIndex {
     const node_index = try self.nodes.addOne(gpa);
     const node_start = self.token_it.pos;
 
-    var entries: std.ArrayListUnmanaged(Map.Entry) = .empty;
+    var entries: std.ArrayList(Map.Entry) = .empty;
     defer entries.deinit(gpa);
 
     log.debug("(map) begin {s}@{d}", .{ @tagName(self.token(node_start).id), node_start });
@@ -351,7 +350,7 @@ fn list(self: *Parser, gpa: Allocator) ParseError!Node.OptionalIndex {
     const node_index: Node.Index = @enumFromInt(try self.nodes.addOne(gpa));
     const node_start = self.token_it.pos;
 
-    var values: std.ArrayListUnmanaged(List.Entry) = .empty;
+    var values: std.ArrayList(List.Entry) = .empty;
     defer values.deinit(gpa);
 
     const first_col = self.getCol(node_start);
@@ -398,7 +397,7 @@ fn listBracketed(self: *Parser, gpa: Allocator) ParseError!Node.OptionalIndex {
     const node_index: Node.Index = @enumFromInt(try self.nodes.addOne(gpa));
     const node_start = self.token_it.pos;
 
-    var values: std.ArrayListUnmanaged(List.Entry) = .empty;
+    var values: std.ArrayList(List.Entry) = .empty;
     defer values.deinit(gpa);
 
     log.debug("(list) begin {s}@{d}", .{ @tagName(self.token(node_start).id), node_start });
@@ -772,11 +771,12 @@ fn getLineInfo(source: []const u8, line_col: LineCol) struct {
     };
 
     const span_start: u32 = span_start: {
-        const trimmed = mem.trimLeft(u8, line, " ");
-        break :span_start @intCast(mem.indexOf(u8, line, trimmed).?);
+        var i: usize = 0;
+        while (i < line.len and line[i] == ' ') : (i += 1) {}
+        break :span_start @intCast(i);
     };
 
-    const span_end: u32 = @intCast(mem.trimRight(u8, line, " \r\n").len);
+    const span_end: u32 = @intCast(line.len);
 
     return .{
         .line = line,

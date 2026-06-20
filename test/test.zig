@@ -9,13 +9,19 @@ const Yaml = @import("yaml").Yaml;
 const gpa = testing.allocator;
 
 fn loadFromFile(file_path: []const u8) !Yaml {
-    const file = try std.fs.cwd().openFile(file_path, .{});
-    defer file.close();
+    var io_instance = std.Io.Threaded.init(gpa, .{});
+    const io = io_instance.io();
+    
+    const file = try std.Io.Dir.cwd().openFile(io, file_path, .{});
+    defer file.close(io);
 
-    const source = try file.readToEndAlloc(gpa, std.math.maxInt(u32));
-    defer gpa.free(source);
+    const size = try file.length(io);
+    var source = try std.ArrayList(u8).initCapacity(gpa, size);
+    defer source.deinit(gpa);
+    source.items.len = size;
+    _ = try file.readStreaming(io, &[_][]u8{source.items});
 
-    var yaml: Yaml = .{ .source = source };
+    var yaml: Yaml = .{ .source = source.items };
     errdefer yaml.deinit(gpa);
     try yaml.load(gpa);
     return yaml;

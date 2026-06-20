@@ -37,15 +37,16 @@ pub fn nodeScope(tree: Tree, node: Node.Index) Node.Scope {
 /// Returns the requested data, as well as the new index which is at the start of the
 /// trailers for the object.
 pub fn extraData(tree: Tree, comptime T: type, index: Extra) struct { data: T, end: Extra } {
-    const fields = std.meta.fields(T);
+    const field_names = comptime std.meta.fieldNames(T);
+    const field_types = comptime std.meta.fieldTypes(T);
     var i = @intFromEnum(index);
     var result: T = undefined;
-    inline for (fields) |field| {
-        @field(result, field.name) = switch (field.type) {
+    inline for (field_names, field_types) |field_name, field_type| {
+        @field(result, field_name) = switch (field_type) {
             u32 => tree.extra[i],
             i32 => @bitCast(tree.extra[i]),
             Node.Index, Node.OptionalIndex, Token.Index => @enumFromInt(tree.extra[i]),
-            else => @compileError("bad field type: " ++ @typeName(field.type)),
+            else => @compileError("bad field type: " ++ @typeName(field_type)),
         };
         i += 1;
     }

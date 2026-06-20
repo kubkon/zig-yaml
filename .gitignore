@@ -4,3 +4,4 @@ deps.zig
 zig-cache
 .zig-cache
 zig-out
+agent/skills.md

@@ -5,8 +5,6 @@ const Yaml = @import("yaml").Yaml;
 
 const mem = std.mem;
 
-var gpa = std.heap.GeneralPurposeAllocator(.{}){};
-
 const usage =
     \\Usage: yaml <path-to-yaml>
     \\
@@ -16,7 +14,7 @@ const usage =
     \\
 ;
 
-var log_scopes: std.ArrayList([]const u8) = std.ArrayList([]const u8).init(gpa.allocator());
+var log_scopes: std.ArrayList([]const u8) = .empty;
 
 fn logFn(
     comptime level: std.log.Level,
@@ -54,31 +52,43 @@ fn logFn(
 
 pub const std_options: std.Options = .{ .logFn = logFn };
 
-pub fn main() !void {
-    var arena = std.heap.ArenaAllocator.init(gpa.allocator());
-    defer arena.deinit();
-    const allocator = arena.allocator();
+pub fn main(init: std.process.Init) !void {
+    const allocator = init.gpa;
+    
+    var args_list = std.ArrayList([]const u8).empty;
+    defer args_list.deinit(allocator);
+    defer log_scopes.deinit(allocator);
+    
+    var args_iter = try init.minimal.args.iterateAllocator(allocator);
+    defer args_iter.deinit();
+    
+    // 跳过第一个参数（程序名）
+    _ = args_iter.next();
+    
+    while (args_iter.next()) |arg| {
+        args_list.append(allocator, arg) catch continue;
+    }
+    const args = args_list.items;
 
-    const all_args = try std.process.argsAlloc(allocator);
-    const args = all_args[1..];
-
-    const stdout = std.fs.File.stdout();
-    const stderr = std.fs.File.stderr();
+    const stdout = std.io.getStdOut();
+    const stderr = std.io.getStdErr();
+    const stdout_writer = stdout.writer();
+    const stderr_writer = stderr.writer();
 
     var file_path: ?[]const u8 = null;
     var arg_index: usize = 0;
     while (arg_index < args.len) : (arg_index += 1) {
         if (mem.eql(u8, "-h", args[arg_index]) or mem.eql(u8, "--help", args[arg_index])) {
-            return stdout.writeAll(usage);
+            return stdout_writer.writeAll(usage);
         } else if (mem.eql(u8, "--debug-log", args[arg_index])) {
             if (arg_index + 1 >= args.len) {
-                return stderr.writeAll("fatal: expected [scope] after --debug-log\n\n");
+                return stderr_writer.writeAll("fatal: expected [scope] after --debug-log\n\n");
             }
             arg_index += 1;
             if (!build_options.enable_logging) {
-                try stderr.writeAll("warn: --debug-log will have no effect as program was not built with -Dlog\n\n");
+                try stderr_writer.writeAll("warn: --debug-log will have no effect as program was not built with -Dlog\n\n");
             } else {
-                try log_scopes.append(args[arg_index]);
+                try log_scopes.append(allocator, args[arg_index]);
             }
         } else {
             file_path = args[arg_index];
@@ -86,15 +96,21 @@ pub fn main() !void {
     }
 
     if (file_path == null) {
-        return stderr.writeAll("fatal: no input path to yaml file specified\n\n");
+        return stderr_writer.writeAll("fatal: no input path to yaml file specified\n\n");
     }
 
-    const file = try std.fs.cwd().openFile(file_path.?, .{});
-    defer file.close();
+    var io_instance = std.Io.Threaded.init(allocator, .{});
+    const io = io_instance.io();
+    
+    const file = try std.Io.Dir.cwd().openFileIo(io, file_path.?, .{});
+    defer file.close(io);
 
-    const source = try file.readToEndAlloc(allocator, std.math.maxInt(u32));
+    const size = try file.length(io);
+    var source = try std.ArrayList(u8).initCapacity(allocator, size);
+    source.items.len = size;
+    _ = try file.readStreaming(io, &[_][]u8{source.items});
 
-    var yaml: Yaml = .{ .source = source };
+    var yaml: Yaml = .{ .source = source.items };
     defer yaml.deinit(allocator);
 
     yaml.load(allocator) catch |err| switch (err) {
@@ -106,6 +122,6 @@ pub fn main() !void {
         else => return err,
     };
 
-    var writer = stdout.writer(&[0]u8{});
-    try yaml.stringify(&writer.interface);
+    var writer = std.Io.Writer.fixed(stdout);
+    try yaml.stringify(&writer);
 }
