@@ -16,7 +16,7 @@ const Tree = @import("Tree.zig");
 const Yaml = @This();
 
 source: []const u8,
-docs: std.ArrayListUnmanaged(Value) = .empty,
+docs: std.ArrayList(Value) = .empty,
 tree: ?Tree = null,
 parse_errors: ErrorBundle = .empty,
 
@@ -152,20 +152,21 @@ fn parseBoolean(self: Yaml, comptime T: type, value: Value) Error!T {
 }
 
 fn parseUnion(self: Yaml, arena: Allocator, comptime T: type, value: Value) Error!T {
-    const union_info = @typeInfo(T).@"union";
+    const type_info = @typeInfo(T);
+    if (type_info != .@"union") return error.UntaggedUnion;
+    const union_info = type_info.@"union";
 
-    if (union_info.tag_type) |_| {
-        inline for (union_info.fields) |field| {
-            if (self.parseValue(arena, field.type, value)) |u_value| {
-                return @unionInit(T, field.name, u_value);
-            } else |err| switch (err) {
-                error.InvalidCharacter => {},
-                error.TypeMismatch => {},
-                error.StructFieldMissing => {},
-                else => return err,
-            }
+    // 对于 tagged union，尝试解析每个 variant 的 payload 类型
+    inline for (union_info.field_names, union_info.field_types) |field_name, field_type| {
+        if (self.parseValue(arena, field_type, value)) |u_value| {
+            return @unionInit(T, field_name, u_value);
+        } else |err| switch (err) {
+            error.InvalidCharacter => {},
+            error.TypeMismatch => {},
+            error.StructFieldMissing => {},
+            else => return err,
         }
-    } else return error.UntaggedUnion;
+    }
 
     return error.UnionTagMissing;
 }
@@ -177,35 +178,31 @@ fn parseOptional(self: Yaml, arena: Allocator, comptime T: type, value: ?Value) 
 }
 
 fn parseStruct(self: Yaml, arena: Allocator, comptime T: type, map: Map) Error!T {
-    const struct_info = @typeInfo(T).@"struct";
+    const type_info = @typeInfo(T);
+    if (type_info != .@"struct") return error.TypeMismatch;
+    const struct_info = type_info.@"struct";
     var parsed: T = undefined;
 
-    inline for (struct_info.fields) |field| {
-        var value: ?Value = map.get(field.name) orelse blk: {
-            const field_name = try mem.replaceOwned(u8, arena, field.name, "_", "-");
-            break :blk map.get(field_name);
+    inline for (struct_info.field_names, struct_info.field_types, struct_info.field_attrs) |field_name, field_type, field_attr| {
+        const value: ?Value = map.get(field_name) orelse blk: {
+            const yaml_field_name = try mem.replaceOwned(u8, arena, field_name, "_", "-");
+            break :blk map.get(yaml_field_name);
         };
 
-        if (@typeInfo(field.type) == .optional) {
-            if (value == null) blk: {
-                const maybe_default_value = field.defaultValue() orelse break :blk;
-                value = Value.encode(arena, maybe_default_value) catch break :blk;
+        if (value == null) {
+            if (field_attr.defaultValue(field_type)) |default_val| {
+                @field(parsed, field_name) = default_val;
+            } else if (@typeInfo(field_type) == .optional) {
+                @field(parsed, field_name) = null;
+            } else {
+                log.debug("missing struct field: {s}: {s}", .{ field_name, @typeName(field_type) });
+                return error.StructFieldMissing;
             }
-            @field(parsed, field.name) = try self.parseOptional(arena, field.type, value);
-            continue;
+        } else if (@typeInfo(field_type) == .optional) {
+            @field(parsed, field_name) = try self.parseOptional(arena, field_type, value.?);
+        } else {
+            @field(parsed, field_name) = try self.parseValue(arena, field_type, value.?);
         }
-
-        if (field.defaultValue()) |default_value| {
-            if (value == null) blk: {
-                value = Value.encode(arena, default_value) catch break :blk;
-            }
-        }
-
-        const unwrapped = value orelse {
-            log.debug("missing struct field: {s}: {s}", .{ field.name, @typeName(field.type) });
-            return error.StructFieldMissing;
-        };
-        @field(parsed, field.name) = try self.parseValue(arena, field.type, unwrapped);
     }
 
     return parsed;
@@ -308,7 +305,7 @@ pub const YamlError = error{
 
 pub const StringifyError = error{
     OutOfMemory,
-} || YamlError || std.fs.File.WriteError || std.Io.Writer.Error;
+} || YamlError || std.Io.Writer.Error;
 
 pub const List = []Value;
 pub const Map = std.StringArrayHashMapUnmanaged(Value);
@@ -536,7 +533,7 @@ pub const Value = union(enum) {
                 const extra_index = tree.nodeData(node_index).extra;
                 const list = tree.extraData(Tree.List, extra_index);
 
-                var out_list: std.ArrayListUnmanaged(Value) = .empty;
+                var out_list: std.ArrayList(Value) = .empty;
                 errdefer for (out_list.items) |*value| {
                     value.deinit(gpa);
                 };
@@ -573,35 +570,47 @@ pub const Value = union(enum) {
             .float,
             => return Value{ .scalar = try std.fmt.allocPrint(arena, "{d}", .{input}) },
 
-            .@"struct" => |info| if (info.is_tuple) {
-                var list: std.ArrayListUnmanaged(Value) = .empty;
-                try list.ensureTotalCapacityPrecise(arena, info.fields.len);
+            .@"struct" => |info| {
+                const T = @TypeOf(input);
+                const type_info = @typeInfo(T);
+                if (type_info != .@"struct") return error.TypeMismatch;
+                const struct_info = type_info.@"struct";
+                
+                if (info.is_tuple) {
+                    var list: std.ArrayList(Value) = .empty;
+                    try list.ensureTotalCapacityPrecise(arena, struct_info.field_names.len);
 
-                inline for (info.fields) |field| {
-                    if (try encode(arena, @field(input, field.name))) |value| {
-                        list.appendAssumeCapacity(value);
+                    inline for (struct_info.field_names, struct_info.field_types) |field_name, field_type| {
+                        _ = field_type;
+                        if (try encode(arena, @field(input, field_name))) |value| {
+                            list.appendAssumeCapacity(value);
+                        }
                     }
-                }
 
-                return Value{ .list = try list.toOwnedSlice(arena) };
-            } else {
-                var map: Map = .empty;
-                try map.ensureTotalCapacity(arena, info.fields.len);
+                    return Value{ .list = try list.toOwnedSlice(arena) };
+                } else {
+                    var map: Map = .empty;
+                    try map.ensureTotalCapacity(arena, struct_info.field_names.len);
 
-                inline for (info.fields) |field| {
-                    if (try encode(arena, @field(input, field.name))) |value| {
-                        const key = try arena.dupe(u8, field.name);
-                        map.putAssumeCapacityNoClobber(key, value);
+                    inline for (struct_info.field_names) |field_name| {
+                        if (try encode(arena, @field(input, field_name))) |value| {
+                            const key = try arena.dupe(u8, field_name);
+                            map.putAssumeCapacityNoClobber(key, value);
+                        }
                     }
-                }
 
-                return Value{ .map = map };
+                    return Value{ .map = map };
+                }
             },
 
             .@"union" => |info| if (info.tag_type) |tag_type| {
-                inline for (info.fields) |field| {
-                    if (@field(tag_type, field.name) == input) {
-                        return try encode(arena, @field(input, field.name));
+                const T = @TypeOf(input);
+                const type_info = @typeInfo(T);
+                if (type_info != .@"union") return error.UntaggedUnion;
+                const union_info = type_info.@"union";
+                inline for (union_info.field_names) |field_name| {
+                    if (@field(tag_type, field_name) == input) {
+                        return try encode(arena, @field(input, field_name));
                     }
                 } else unreachable;
             } else return error.UntaggedUnion,
@@ -623,7 +632,7 @@ pub const Value = union(enum) {
                         return Value{ .scalar = try arena.dupe(u8, input) };
                     }
 
-                    var list: std.ArrayListUnmanaged(Value) = .empty;
+                    var list: std.ArrayList(Value) = .empty;
                     try list.ensureTotalCapacityPrecise(arena, input.len);
 
                     for (input) |elem| {

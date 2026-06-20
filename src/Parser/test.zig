@@ -630,7 +630,7 @@ fn parseError2(source: []const u8, comptime format: []const u8, args: anytype) !
 
     var given: std.Io.Writer.Allocating = .init(testing.allocator);
     defer given.deinit();
-    try bundle.renderToWriter(.{ .ttyconf = .no_color }, &given.writer);
+    try bundle.renderToWriter(.{}, &given.writer);
 
     const expected = try std.fmt.allocPrint(testing.allocator, format, args);
     defer testing.allocator.free(expected);
