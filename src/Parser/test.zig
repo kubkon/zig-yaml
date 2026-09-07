@@ -878,6 +878,19 @@ test "empty map" {
     );
 }
 
+test "curly brackets denote a map" {
+    try parseSuccess(
+        \\a: {b: c, d: e}
+    );
+}
+
+test "empty flow map followed by a sibling key" {
+    try parseSuccess(
+        \\preferences: {}
+        \\current-context: test
+    );
+}
+
 test "comment within a bracketed list is an error" {
     try parseError(
         \\[ # something

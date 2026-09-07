@@ -168,6 +168,11 @@ fn value(self: *Parser, gpa: Allocator) ParseError!Node.OptionalIndex {
             self.token_it.seekBy(-1);
             return self.listBracketed(gpa);
         },
+        .flow_map_start => {
+            // flow map (e.g., {key: value})
+            self.token_it.seekBy(-1);
+            return self.mapBracketed(gpa);
+        },
         else => return .none,
     }
 }
@@ -390,6 +395,105 @@ fn list(self: *Parser, gpa: Allocator) ParseError!Node.OptionalIndex {
         .start = node_start,
         .end = node_end,
     });
+
+    return node_index.toOptional();
+}
+
+fn mapBracketed(self: *Parser, gpa: Allocator) ParseError!Node.OptionalIndex {
+    const node_index: Node.Index = @enumFromInt(try self.nodes.addOne(gpa));
+    const node_start = self.token_it.pos;
+
+    var entries: std.ArrayListUnmanaged(Map.Entry) = .empty;
+    defer entries.deinit(gpa);
+
+    log.debug("(map) begin {s}@{d}", .{ @tagName(self.token(node_start).id), node_start });
+
+    _ = try self.expectToken(.flow_map_start, &.{});
+
+    const node_end: Token.Index = while (true) {
+        self.eatCommentsAndSpace(&.{.comment});
+
+        if (self.eatToken(.flow_map_end, &.{.comment})) |pos|
+            break pos;
+
+        _ = self.eatToken(.comma, &.{.comment});
+
+        if (self.eatToken(.flow_map_end, &.{.comment})) |pos|
+            break pos;
+
+        // Parse key
+        const key_pos = self.token_it.pos;
+        const key = self.token_it.next() orelse return error.UnexpectedEof;
+        if (key.id != .literal) {
+            return self.fail(gpa, key_pos, "expecting a key in flow map", .{});
+        }
+
+        log.debug("(map) key {s}@{d}", .{ self.rawString(key_pos, key_pos), key_pos });
+
+        // Separator
+        _ = try self.expectToken(.map_value_ind, &.{.comment});
+
+        // Parse value
+        const value_raw_pos = self.token_it.pos;
+        const value_index = try self.value(gpa);
+        if (value_index == .none) {
+            return self.fail(gpa, value_raw_pos, "expecting a value in flow map", .{});
+        }
+
+        try entries.append(gpa, .{
+            .key = key_pos,
+            .maybe_node = value_index,
+        });
+    };
+
+    if (self.eatToken(.comment, &.{.comment})) |pos| {
+        return self.fail(gpa, pos, "comments must be separated from other tokens by white space characters", .{});
+    }
+
+    log.debug("(map) end {s}@{d}", .{ @tagName(self.token(node_end).id), node_end });
+
+    const scope: Node.Scope = .{
+        .start = node_start,
+        .end = node_end,
+    };
+
+    if (entries.items.len == 0) {
+        // Empty flow map: {}
+        self.nodes.set(@intFromEnum(node_index), .{
+            .tag = .map_single,
+            .scope = scope,
+            .data = .{ .map = .{
+                .key = node_start,
+                .maybe_node = .none,
+            } },
+        });
+    } else if (entries.items.len == 1) {
+        const entry = entries.items[0];
+
+        self.nodes.set(@intFromEnum(node_index), .{
+            .tag = .map_single,
+            .scope = scope,
+            .data = .{ .map = .{
+                .key = entry.key,
+                .maybe_node = entry.maybe_node,
+            } },
+        });
+    } else {
+        try self.extra.ensureUnusedCapacity(gpa, entries.items.len * 2 + 1);
+        const extra_index: u32 = @intCast(self.extra.items.len);
+
+        _ = self.addExtraAssumeCapacity(Map{ .map_len = @intCast(entries.items.len) });
+
+        for (entries.items) |entry| {
+            _ = self.addExtraAssumeCapacity(entry);
+        }
+
+        self.nodes.set(@intFromEnum(node_index), .{
+            .tag = .map_many,
+            .scope = scope,
+            .data = .{ .extra = @enumFromInt(extra_index) },
+        });
+    }
 
     return node_index.toOptional();
 }
